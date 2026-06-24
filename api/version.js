@@ -1,7 +1,7 @@
 'use strict';
 
 const STARTED_AT = new Date().toISOString();
-const VERSION = '0.7.1';
+const VERSION = '0.8.0';
 
 module.exports = function handler(req, res) {
   res.setHeader('cache-control', 'no-store');

@@ -2,11 +2,7 @@
   color-scheme: dark;
   --blue: #000080;
   --blue-dark: #00004a;
-  --cyan: #00ffff;
   --white: #f4f4ff;
-  --yellow: #ffff66;
-  --red: #ff7777;
-  --green: #66ff66;
   --font: "D2Coding", "Nanum Gothic Coding", "GulimChe", "굴림체", "Courier New", monospace;
 }
 
@@ -21,7 +17,7 @@ body {
 }
 
 body {
-  background: #050505;
+  background: var(--blue);
   color: var(--white);
   font-family: var(--font);
 }
@@ -36,14 +32,14 @@ button {
   padding: 5px 10px;
   color: var(--white);
   background: var(--blue);
-  border: 1px solid var(--cyan);
+  border: 1px solid var(--white);
   cursor: pointer;
 }
 
 button:hover:not(:disabled),
 button:focus-visible {
-  color: #000;
-  background: var(--yellow);
+  color: var(--blue);
+  background: var(--white);
   outline: 0;
 }
 
@@ -70,32 +66,33 @@ input:disabled {
   justify-content: space-between;
   min-height: 34px;
   padding: 5px 8px;
-  color: #000;
-  background: var(--white);
+  color: var(--white);
+  background: var(--blue);
+  border: 1px solid var(--white);
 }
 
 #status.online {
-  color: #005000;
+  color: var(--white);
 }
 
 #status.offline {
-  color: #8b0000;
+  color: var(--white);
 }
 
 .intro {
   padding: 36px 8px 28px;
   text-align: center;
-  border-bottom: 1px solid var(--cyan);
+  border-bottom: 1px solid var(--white);
 }
 
 .intro p {
   margin: 0;
-  color: var(--cyan);
+  color: var(--white);
 }
 
 .intro h1 {
   margin: 18px 0;
-  color: var(--yellow);
+  color: var(--white);
   font-size: clamp(46px, 10vw, 88px);
   line-height: 1;
   letter-spacing: 0;
@@ -105,7 +102,7 @@ input:disabled {
   margin-top: 10px;
   padding: 8px;
   background: var(--blue-dark);
-  border: 1px solid var(--cyan);
+  border: 1px solid var(--white);
 }
 
 .notice pre,
@@ -127,9 +124,9 @@ input:disabled {
   margin-top: 10px;
   padding: 12px;
   overflow: auto;
-  color: var(--green);
-  background: #000;
-  border: 1px solid var(--cyan);
+  color: var(--white);
+  background: var(--blue-dark);
+  border: 1px solid var(--white);
   line-height: 1.45;
 }
 
@@ -143,14 +140,19 @@ input:disabled {
   width: 100%;
   min-height: 34px;
   padding: 5px 8px;
-  color: var(--green);
-  background: #000;
+  color: var(--white);
+  background: var(--blue);
   border: 1px solid var(--blue);
   outline: 0;
 }
 
 .commandbar input:focus {
-  border-color: #000;
+  border-color: var(--white);
+}
+
+.commandbar input::placeholder {
+  color: var(--white);
+  opacity: 0.72;
 }
 
 @media (max-width: 700px) {

@@ -1,7 +1,7 @@
 'use strict';
 
 const STARTED_AT = new Date();
-const VERSION = '0.7.1';
+const VERSION = '0.8.0';
 
 module.exports = function handler(req, res) {
   res.setHeader('cache-control', 'no-store');
@@ -15,30 +15,30 @@ module.exports = function handler(req, res) {
       accessTokenRequired: false
     },
     mud: {
-      target: 'unavailable on Vercel',
+      target: 'browser simulation',
       websocketPath: '/ws/mud',
       legacyWebsocketPath: '/ws',
       activeClients: 0,
       totalClients: 0,
-      maxClients: 0,
+      maxClients: 100,
       telnetFilter: true,
-      ready: false,
-      error: 'Vercel cannot run this TCP/WebSocket gateway'
+      ready: true,
+      error: null
     },
     agent: {
-      enabled: false,
-      ready: false,
-      command: 'agy',
-      workdir: '/workspace',
-      websocketPath: '/ws/agent',
+      enabled: true,
+      ready: true,
+      command: 'neko-browser-guide',
+      workdir: 'browser',
+      websocketPath: null,
       activeSessions: 0,
       totalSessions: 0,
-      maxSessions: 0,
+      maxSessions: 100,
       useScriptPty: false,
       scriptAvailable: false,
       ptyBridgeAvailable: false,
       localOnly: false,
-      error: 'disabled'
+      error: null
     }
   });
 };

@@ -4,14 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>무한대전</title>
-    <meta name="app-version" content="0.7.1" />
+    <meta name="app-version" content="0.8.0" />
     <meta http-equiv="cache-control" content="no-store" />
     <meta http-equiv="pragma" content="no-cache" />
     <meta http-equiv="expires" content="0" />
-    <link rel="stylesheet" href="/styles.css?v=0.7.1-simple" />
+    <link rel="stylesheet" href="/styles.css?v=0.8.0-neko" />
   </head>
   <body>
-    <main class="terminal-shell" data-ui-version="0.7.1">
+    <main class="terminal-shell" data-ui-version="0.8.0">
       <header class="top-line">
         <span>MUHAN NET 01410</span>
         <span id="status">상태 확인 중</span>
@@ -28,9 +28,9 @@
       </section>
 
       <section class="menu" aria-label="메뉴">
-        <button id="gameConnect" type="button">1. 접속</button>
-        <button id="gameDisconnect" type="button" disabled>2. 끊기</button>
-        <button id="gameEnter" type="button" disabled>3. 엔터</button>
+        <button id="gameConnect" type="button">1. 입장</button>
+        <button id="gameDisconnect" type="button" disabled>2. 퇴장</button>
+        <button id="gameEnter" type="button" disabled>3. 네코</button>
         <button id="gameClear" type="button">4. 화면 지우기</button>
         <button id="checkStatus" type="button">5. 상태 확인</button>
       </section>
@@ -39,14 +39,13 @@
 
       <form id="gameForm" class="commandbar" autocomplete="off">
         <label for="gameCommand">선택&gt;</label>
-        <input id="gameCommand" type="text" placeholder="명령어 입력" disabled />
+        <input id="gameCommand" type="text" placeholder="네코에게 묻거나 명령어 입력" disabled />
         <button id="gameSend" type="submit" disabled>전송</button>
       </form>
 
-      <input id="stripAnsi" type="checkbox" checked hidden />
       <input id="autoScroll" type="checkbox" checked hidden />
     </main>
 
-    <script src="/app.js?v=0.7.1-simple"></script>
+    <script src="/app.js?v=0.8.0-neko"></script>
   </body>
 </html>
