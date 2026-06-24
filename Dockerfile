@@ -16,7 +16,8 @@ RUN git init muhan \
   && git checkout --detach FETCH_HEAD
 
 WORKDIR /opt/muhan
-RUN make -C src -j"$(nproc)" CC=gcc
+RUN make -C src clean >/dev/null 2>&1 || true \
+  && make -C src -j4 CC=gcc
 RUN test -x /opt/muhan/src/frp.new
 
 FROM --platform=linux/amd64 node:22-bookworm-slim AS runtime
@@ -25,7 +26,8 @@ ENV NODE_ENV=production \
     MUHAN_HOST=127.0.0.1 \
     MUHAN_PORT=4102 \
     WEB_HOST=0.0.0.0 \
-    WEB_PORT=8080
+    WEB_PORT=8080 \
+    TELNET_FILTER=1
 
 WORKDIR /app
 COPY --from=muhan-build /opt/muhan /opt/muhan

@@ -5,7 +5,6 @@ const fs = require('fs');
 const http = require('http');
 const net = require('net');
 const path = require('path');
-const { StringDecoder } = require('string_decoder');
 const { URL } = require('url');
 
 const WEB_HOST = process.env.WEB_HOST || '0.0.0.0';
@@ -17,6 +16,7 @@ const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'web');
 const MAX_FRAME_SIZE = Number.parseInt(process.env.MAX_FRAME_SIZE || String(64 * 1024), 10);
 const IDLE_TIMEOUT_MS = Number.parseInt(process.env.IDLE_TIMEOUT_MS || String(30 * 60 * 1000), 10);
+const TELNET_FILTER = process.env.TELNET_FILTER !== '0';
 
 const MIME_TYPES = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -128,13 +128,86 @@ function createAcceptKey(secWebSocketKey) {
     .digest('base64');
 }
 
+
+class TelnetFilter {
+  constructor(tcpSocket) {
+    this.tcpSocket = tcpSocket;
+    this.state = 'data';
+    this.command = 0;
+  }
+
+  process(chunk) {
+    const out = [];
+
+    for (const byte of chunk) {
+      if (this.state === 'data') {
+        if (byte === 255) this.state = 'iac';
+        else out.push(byte);
+        continue;
+      }
+
+      if (this.state === 'iac') {
+        if (byte === 255) {
+          out.push(255);
+          this.state = 'data';
+          continue;
+        }
+
+        if (byte === 251 || byte === 252 || byte === 253 || byte === 254) {
+          this.command = byte;
+          this.state = 'option';
+          continue;
+        }
+
+        if (byte === 250) {
+          this.state = 'subnegotiation';
+          continue;
+        }
+
+        this.state = 'data';
+        continue;
+      }
+
+      if (this.state === 'option') {
+        // Minimal telnet negotiation for browser clients:
+        //   server WILL x -> client DONT x
+        //   server DO x   -> client WONT x
+        // This keeps MUHAN usable over a browser WebSocket without leaking IAC
+        // bytes into the visible terminal output.
+        if (this.command === 251) this.reply(254, byte); // WILL -> DONT
+        if (this.command === 253) this.reply(252, byte); // DO   -> WONT
+        this.command = 0;
+        this.state = 'data';
+        continue;
+      }
+
+      if (this.state === 'subnegotiation') {
+        if (byte === 255) this.state = 'subnegotiation-iac';
+        continue;
+      }
+
+      if (this.state === 'subnegotiation-iac') {
+        this.state = byte === 240 ? 'data' : 'subnegotiation';
+      }
+    }
+
+    return Buffer.from(out);
+  }
+
+  reply(command, option) {
+    if (!this.tcpSocket.destroyed) {
+      this.tcpSocket.write(Buffer.from([255, command, option]));
+    }
+  }
+}
+
 class WsTcpBridge {
   constructor(wsSocket, tcpSocket, options = {}) {
     this.wsSocket = wsSocket;
     this.tcpSocket = tcpSocket;
     this.remoteAddress = options.remoteAddress || 'unknown';
     this.wsBuffer = Buffer.alloc(0);
-    this.tcpDecoder = new StringDecoder('utf8');
+    this.telnetFilter = new TelnetFilter(tcpSocket);
     this.closed = false;
     this.lastActiveAt = Date.now();
     this.fragmentOpcode = null;
@@ -158,16 +231,14 @@ class WsTcpBridge {
 
     tcpSocket.on('data', (chunk) => {
       this.lastActiveAt = Date.now();
-      const text = this.tcpDecoder.write(chunk);
-      if (text) this.sendText(text);
+      const payload = TELNET_FILTER ? this.telnetFilter.process(chunk) : chunk;
+      if (payload.length > 0) this.sendBinary(payload);
     });
     tcpSocket.on('error', (error) => {
       this.sendText(`\n[gateway] MUHAN server error: ${error.message}\n`);
       this.close();
     });
     tcpSocket.on('close', () => {
-      const tail = this.tcpDecoder.end();
-      if (tail) this.sendText(tail);
       this.sendText('\n[gateway] MUHAN server disconnected.\n');
       this.close();
     });
@@ -283,6 +354,11 @@ class WsTcpBridge {
   sendText(text) {
     if (this.closed || !text) return;
     this.sendFrame(0x1, Buffer.from(text, 'utf8'));
+  }
+
+  sendBinary(payload) {
+    if (this.closed || !payload || payload.length === 0) return;
+    this.sendFrame(0x2, Buffer.from(payload));
   }
 
   sendClose(code, reason) {
@@ -405,6 +481,7 @@ server.listen(WEB_PORT, WEB_HOST, () => {
   console.log(`[gateway] websocket: ${WS_PATH}`);
   console.log(`[gateway] target: ${MUHAN_HOST}:${MUHAN_PORT}`);
   if (ACCESS_TOKEN) console.log('[gateway] access token: enabled');
+  console.log(`[gateway] telnet filter: ${TELNET_FILTER ? 'enabled' : 'disabled'}`);
 });
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));

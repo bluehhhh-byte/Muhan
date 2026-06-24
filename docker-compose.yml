@@ -15,6 +15,7 @@ services:
       WEB_PORT: 8080
       ACCESS_TOKEN: ${ACCESS_TOKEN:-}
       IDLE_TIMEOUT_MS: ${IDLE_TIMEOUT_MS:-1800000}
+      TELNET_FILTER: ${TELNET_FILTER:-1}
     ports:
       - "${WEB_PORT:-8080}:8080"
     restart: unless-stopped

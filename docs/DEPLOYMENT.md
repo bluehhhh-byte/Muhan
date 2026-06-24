@@ -31,6 +31,7 @@ WEB_PORT=8080
 MUHAN_PORT=4102
 ACCESS_TOKEN=replace-with-a-long-random-token
 IDLE_TIMEOUT_MS=1800000
+TELNET_FILTER=1
 ```
 
 ## Reverse proxy note

@@ -1,7 +1,10 @@
-.PHONY: check run build logs down clean
+.PHONY: check test run build logs down clean doctor
 
 check:
 	npm run check
+
+test:
+	npm test
 
 build:
 	docker compose build
@@ -11,6 +14,10 @@ run:
 
 logs:
 	docker compose logs -f
+
+doctor:
+	docker compose ps
+	docker compose logs --tail=200
 
 down:
 	docker compose down

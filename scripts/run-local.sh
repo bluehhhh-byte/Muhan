@@ -6,6 +6,7 @@ set -eu
 : "${MUHAN_HOST:=127.0.0.1}"
 : "${WEB_HOST:=0.0.0.0}"
 : "${WEB_PORT:=8080}"
+: "${MUHAN_LOG:=/tmp/muhan-frp.log}"
 
 if [ ! -x "$MUHAN_HOME/src/frp.new" ]; then
   echo "Missing executable: $MUHAN_HOME/src/frp.new" >&2
@@ -15,19 +16,29 @@ fi
 
 mkdir -p /home 2>/dev/null || true
 ln -sfn "$MUHAN_HOME" /home/muhan 2>/dev/null || true
+: > "$MUHAN_LOG"
 
-MUHAN_HOME="$MUHAN_HOME" "$MUHAN_HOME/src/frp.new" -r "$MUHAN_PORT" >/tmp/muhan-frp.log 2>&1 &
+(
+  cd "$MUHAN_HOME"
+  export MUHAN_HOME
+  exec ./src/frp.new -r "$MUHAN_PORT"
+) >"$MUHAN_LOG" 2>&1 &
 muhan_pid=$!
 web_pid=""
 
 cleanup() {
   if [ -n "$web_pid" ]; then kill "$web_pid" >/dev/null 2>&1 || true; fi
   kill "$muhan_pid" >/dev/null 2>&1 || true
+  pkill -f "$MUHAN_HOME/src/frp.new" >/dev/null 2>&1 || true
 }
 trap cleanup INT TERM EXIT
 
-node ./scripts/wait-for-tcp.js "$MUHAN_HOST" "$MUHAN_PORT" 20000
+if ! node ./scripts/wait-for-tcp.js "$MUHAN_HOST" "$MUHAN_PORT" 20000; then
+  echo "MUHAN failed to open TCP. Last log lines:" >&2
+  tail -n 200 "$MUHAN_LOG" >&2 || true
+  exit 1
+fi
+
 node ./server/server.js &
 web_pid=$!
-
 wait "$web_pid"

@@ -18,6 +18,7 @@ let socket = null;
 let outputBuffer = '';
 let history = [];
 let historyIndex = 0;
+let terminalDecoder = new TextDecoder('utf-8', { fatal: false });
 
 const savedToken = localStorage.getItem('muhan.accessToken');
 if (savedToken) tokenEl.value = savedToken;
@@ -102,13 +103,20 @@ function connect() {
 
   socket.addEventListener('message', async (event) => {
     if (event.data instanceof ArrayBuffer) {
-      appendText(new TextDecoder('utf-8').decode(event.data));
+      appendText(terminalDecoder.decode(event.data, { stream: true }));
       return;
     }
     appendText(event.data);
   });
 
   socket.addEventListener('close', (event) => {
+    try {
+      const tail = terminalDecoder.decode();
+      if (tail) appendText(tail);
+    } catch (_) {
+      // ignore decoder flush errors
+    }
+    terminalDecoder = new TextDecoder('utf-8', { fatal: false });
     setConnected(false);
     setStatus('연결 종료', 'offline');
     appendText(`\n[gateway] disconnected${event.reason ? `: ${event.reason}` : ''}.\n`);
