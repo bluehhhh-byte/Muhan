@@ -1,0 +1,43 @@
+services:
+  muhan-web:
+    build:
+      context: .
+      args:
+        MUHAN_REPO: ${MUHAN_REPO:-https://github.com/comfuture/muhan.git}
+        MUHAN_REF: ${MUHAN_REF:-master}
+        INSTALL_AGY: ${INSTALL_AGY:-0}
+    image: muhan-web-runner:local
+    platform: linux/amd64
+    environment:
+      MUHAN_HOME: /opt/muhan
+      MUHAN_HOST: 127.0.0.1
+      MUHAN_PORT: ${MUHAN_PORT:-4102}
+      MUHAN_LOG: /tmp/muhan-frp.log
+      MUHAN_LOG_TO_STDOUT: ${MUHAN_LOG_TO_STDOUT:-1}
+      MUHAN_START_TIMEOUT_MS: ${MUHAN_START_TIMEOUT_MS:-40000}
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+      MUD_WS_PATH: /ws/mud
+      WS_PATH: /ws
+      AGENT_WS_PATH: /ws/agent
+      ENABLE_AGENT: ${ENABLE_AGENT:-1}
+      AGENT_COMMAND: ${AGENT_COMMAND:-agy}
+      AGENT_WORKDIR: ${AGENT_WORKDIR:-/workspace}
+      AGENT_MAX_SESSIONS: ${AGENT_MAX_SESSIONS:-1}
+      AGENT_IDLE_TIMEOUT_MS: ${AGENT_IDLE_TIMEOUT_MS:-3600000}
+      AGENT_USE_SCRIPT: ${AGENT_USE_SCRIPT:-1}
+      AGENT_LOCAL_ONLY: ${AGENT_LOCAL_ONLY:-0}
+      IDLE_TIMEOUT_MS: ${IDLE_TIMEOUT_MS:-1800000}
+      TCP_CONNECT_TIMEOUT_MS: ${TCP_CONNECT_TIMEOUT_MS:-5000}
+      MAX_CLIENTS: ${MAX_CLIENTS:-1}
+      TELNET_FILTER: ${TELNET_FILTER:-1}
+      HEALTHCHECK_TARGET: ${HEALTHCHECK_TARGET:-0}
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${WEB_PORT:-8080}:8080"
+    volumes:
+      - agent-home:/root
+      - .:/workspace
+    restart: unless-stopped
+
+volumes:
+  agent-home:

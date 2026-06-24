@@ -1,0 +1,17 @@
+{
+  "name": "muhan-web-runner",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Browser-playable web gateway for MUHAN with an optional Antigravity CLI console.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/server.js",
+    "check": "node --check server/server.js && node --check web/app.js && node --check scripts/wait-for-tcp.js && node --check scripts/healthcheck.js && node --check scripts/smoke-gateway.js && node --check scripts/smoke-agent.js && python3 -m py_compile server/pty_bridge.py",
+    "test": "node scripts/smoke-gateway.js && node scripts/smoke-agent.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
