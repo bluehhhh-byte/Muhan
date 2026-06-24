@@ -8,6 +8,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { URL } = require('url');
 
+const PACKAGE = require('../package.json');
+const APP_VERSION = process.env.APP_VERSION || PACKAGE.version || '0.7.0';
+
 const WEB_HOST = process.env.WEB_HOST || '0.0.0.0';
 const WEB_PORT = Number.parseInt(process.env.WEB_PORT || '8080', 10);
 const MUHAN_HOST = process.env.MUHAN_HOST || '127.0.0.1';
@@ -173,7 +176,7 @@ async function statusPayload(includeTarget) {
     ok: includeTarget ? Boolean(mud.ready) : true,
     gateway: {
       name: 'muhan-web-runner',
-      version: '0.5.0',
+      version: APP_VERSION,
       startedAt: startedAt.toISOString(),
       uptimeSec: Math.round(process.uptime()),
       accessTokenRequired: false
@@ -212,9 +215,15 @@ function sendStatic(req, res) {
     }
 
     const ext = path.extname(filePath).toLowerCase();
+    // This project is usually rebuilt repeatedly while debugging. Never let the
+    // browser or an intermediate proxy keep an older app.js/styles.css copy.
     res.writeHead(200, {
       'content-type': MIME_TYPES.get(ext) || 'application/octet-stream',
-      'cache-control': ext === '.html' ? 'no-store' : 'public, max-age=3600',
+      'cache-control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      pragma: 'no-cache',
+      expires: '0',
+      'surrogate-control': 'no-store',
+      'x-app-version': APP_VERSION,
       'content-length': stat.size
     });
 
@@ -713,6 +722,17 @@ function handleAgentUpgrade(req, socket, head, secKey) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+  if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/version' || url.pathname === '/api/version')) {
+    json(res, 200, {
+      name: 'muhan-web-runner',
+      version: APP_VERSION,
+      publicDir: PUBLIC_DIR,
+      startedAt: startedAt.toISOString(),
+      cachePolicy: 'no-store'
+    }, req);
+    return;
+  }
+
   if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/healthz') {
     const payload = await statusPayload(HEALTHCHECK_TARGET);
     json(res, payload.ok ? 200 : 503, payload, req);
@@ -753,6 +773,8 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(WEB_PORT, WEB_HOST, () => {
+  console.log(`[gateway] version: ${APP_VERSION}`);
+  console.log(`[gateway] public dir: ${PUBLIC_DIR}`);
   console.log(`[gateway] web: http://${WEB_HOST}:${WEB_PORT}`);
   console.log(`[gateway] MUD websocket: ${MUD_WS_PATH} (legacy ${LEGACY_WS_PATH})`);
   console.log(`[gateway] MUD target: ${MUHAN_HOST}:${MUHAN_PORT}`);

@@ -1,5 +1,8 @@
+name: muhan-web-runner
+
 services:
   muhan-web:
+    container_name: muhan-web-runner
     build:
       context: .
       args:
@@ -37,6 +40,12 @@ services:
     volumes:
       - agent-home:/root
       - .:/workspace
+      # Development bind mounts: UI/server changes are reflected after container
+      # recreation even if Docker's image cache is stale.
+      - ./web:/app/web:ro
+      - ./server:/app/server:ro
+      - ./scripts:/app/scripts:ro
+      - ./package.json:/app/package.json:ro
     restart: unless-stopped
 
 volumes:

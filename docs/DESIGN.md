@@ -1,19 +1,7 @@
 # Design Notes
 
-v0.5 UI는 1990년대 한국 PC통신 클라이언트의 분위기를 현대 브라우저 CSS로 재현합니다.
+The UI uses an original CSS/HTML interpretation of 1990s Korean PC communication clients.
 
-## 구성
+It intentionally does not bundle third-party screenshots, service logos, or trademarked artwork. The look is created from simple shapes, terminal colors, beveled window chrome, and text labels.
 
-- 회색 데스크톱 프로그램 프레임
-- 상단 제목 표시줄, 메뉴바, 툴바
-- 좌측 접속 메뉴
-- 파란 VT/ANSI 화면
-- 청록색 대형 부트 타이틀
-- `아무키나 누르세요...` 점멸 문구
-- 하단 79x23 스타일 상태바
-
-## 저작권/상표 주의
-
-사용자가 참고용으로 제공한 천리안/하이텔/나우누리 계열 이미지는 저장소에 포함하지 않았습니다.
-또한 실제 서비스 로고, 회사명, 화면 이미지를 그대로 복제하지 않았습니다.
-현재 UI는 무한대전 웹 실행기에 맞춘 오리지널 CSS/HTML입니다.
+v0.7 adds visible version markers (`v0.7.0`) so stale containers and browser cache problems can be spotted immediately.

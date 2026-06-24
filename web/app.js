@@ -2,6 +2,7 @@
 
 const MAX_BUFFER_CHARS = 240_000;
 const HISTORY_LIMIT = 80;
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.7.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -260,7 +261,8 @@ function updateStatusCards(data) {
   else setStatus('MUD 미준비', 'offline');
 
   const parts = [
-    `Gateway uptime ${formatUptime(data.gateway.uptimeSec)}`,
+    `UI ${APP_VERSION}`,
+    `Gateway ${data.gateway.version || 'unknown'} uptime ${formatUptime(data.gateway.uptimeSec)}`,
     `MUD ${data.mud.ready ? 'ready' : 'not ready'} (${data.mud.target})`,
     `AI ${data.agent.enabled ? (data.agent.ready ? 'ready' : 'not ready') : 'disabled'}`
   ];
@@ -297,6 +299,21 @@ const gameSession = new TerminalSession({
   connectingLabel: '게임 접속 중',
   disconnectedLabel: '게임 연결 종료'
 });
+
+
+const pressAnyKeyBtn = document.getElementById('pressAnyKey');
+const bootScreenEl = document.getElementById('bootScreen');
+if (pressAnyKeyBtn) {
+  pressAnyKeyBtn.addEventListener('click', () => {
+    if (!gameSession.socket || gameSession.socket.readyState !== WebSocket.OPEN) gameSession.connect();
+    else gameSession.sendRaw('\n');
+  });
+}
+if (bootScreenEl) {
+  bootScreenEl.addEventListener('dblclick', () => {
+    if (!gameSession.socket || gameSession.socket.readyState !== WebSocket.OPEN) gameSession.connect();
+  });
+}
 
 const agentSession = new TerminalSession({
   name: 'AI',
@@ -342,7 +359,7 @@ window.addEventListener('beforeunload', () => {
   agentSession.closeBeforeUnload();
 });
 
-gameSession.append('MUHAN NET 01410\n무한대전 PC통신 접속 대기 중입니다. [접속] 버튼을 누르면 MUD 서버에 연결됩니다.\n첫 화면에서 [엔터] 또는 [아무키나 누르세요]가 보이면 Enter를 누르세요.\n\n선택> ');
+gameSession.append(`MUHAN NET 01410 · UI ${APP_VERSION}\n무한대전 PC통신 접속 대기 중입니다. [접속] 버튼을 누르면 MUD 서버에 연결됩니다.\n첫 화면에서 [엔터] 또는 [아무키나 누르세요]가 보이면 Enter를 누르세요.\n\n선택> `);
 agentSession.append('ANTIGRAVITY LOCAL DEV CONSOLE\n.env에서 ENABLE_AGENT=1로 켠 뒤 [AI 연결] 버튼을 누르세요. 기본 명령은 agy입니다.\n\nAGY> ');
 checkStatus();
 setInterval(checkStatus, 10_000);
