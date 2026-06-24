@@ -2,22 +2,17 @@
 
 const MAX_BUFFER_CHARS = 240_000;
 const HISTORY_LIMIT = 80;
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.7.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.7.1';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
-const gatewayStateEl = document.getElementById('gatewayState');
-const mudStateEl = document.getElementById('mudState');
-const agentStateEl = document.getElementById('agentState');
-const clientStateEl = document.getElementById('clientState');
 const checkStatusBtn = document.getElementById('checkStatus');
 const stripAnsiEl = document.getElementById('stripAnsi');
 const autoScrollEl = document.getElementById('autoScroll');
-const agentHelpTextEl = document.getElementById('agentHelpText');
 
 function setStatus(text, className) {
   statusEl.textContent = text;
-  statusEl.className = `status ${className || ''}`.trim();
+  statusEl.className = className || '';
 }
 
 function setDiagnostics(text) {
@@ -47,7 +42,6 @@ function safeErrorMessage(error) {
 
 class TerminalSession {
   constructor(options) {
-    this.name = options.name;
     this.path = options.path;
     this.screenEl = options.screenEl;
     this.commandEl = options.commandEl;
@@ -56,16 +50,8 @@ class TerminalSession {
     this.disconnectBtn = options.disconnectBtn;
     this.sendBtn = options.sendBtn;
     this.clearBtn = options.clearBtn;
-    this.enterBtn = options.enterBtn || null;
-    this.ctrlCBtn = options.ctrlCBtn || null;
-    this.eofBtn = options.eofBtn || null;
-    this.arrowUpBtn = options.arrowUpBtn || null;
-    this.arrowDownBtn = options.arrowDownBtn || null;
-    this.lineEnding = options.lineEnding || '\n';
-    this.connectedLabel = options.connectedLabel || `${this.name} 연결됨`;
-    this.connectingLabel = options.connectingLabel || `${this.name} 연결 중`;
-    this.disconnectedLabel = options.disconnectedLabel || `${this.name} 연결 종료`;
-
+    this.enterBtn = options.enterBtn;
+    this.lineEnding = '\n';
     this.socket = null;
     this.outputBuffer = '';
     this.history = [];
@@ -80,12 +66,7 @@ class TerminalSession {
     this.connectBtn.addEventListener('click', () => this.connect());
     this.disconnectBtn.addEventListener('click', () => this.disconnect());
     this.clearBtn.addEventListener('click', () => this.clear());
-
-    if (this.enterBtn) this.enterBtn.addEventListener('click', () => this.sendRaw(this.lineEnding));
-    if (this.arrowUpBtn) this.arrowUpBtn.addEventListener('click', () => this.sendRaw('\x1b[A'));
-    if (this.arrowDownBtn) this.arrowDownBtn.addEventListener('click', () => this.sendRaw('\x1b[B'));
-    if (this.ctrlCBtn) this.ctrlCBtn.addEventListener('click', () => this.sendRaw('\x03'));
-    if (this.eofBtn) this.eofBtn.addEventListener('click', () => this.sendRaw('\x04'));
+    this.enterBtn.addEventListener('click', () => this.sendRaw(this.lineEnding));
 
     this.formEl.addEventListener('submit', (event) => {
       event.preventDefault();
@@ -100,7 +81,6 @@ class TerminalSession {
         if (this.history.length === 0) return;
         this.historyIndex = Math.max(0, this.historyIndex - 1);
         this.commandEl.value = this.history[this.historyIndex] || '';
-        this.commandEl.setSelectionRange(this.commandEl.value.length, this.commandEl.value.length);
       }
 
       if (event.key === 'ArrowDown') {
@@ -108,12 +88,6 @@ class TerminalSession {
         if (this.history.length === 0) return;
         this.historyIndex = Math.min(this.history.length, this.historyIndex + 1);
         this.commandEl.value = this.history[this.historyIndex] || '';
-        this.commandEl.setSelectionRange(this.commandEl.value.length, this.commandEl.value.length);
-      }
-
-      if (event.ctrlKey && event.key.toLowerCase() === 'l') {
-        event.preventDefault();
-        this.clear();
       }
     });
   }
@@ -144,27 +118,23 @@ class TerminalSession {
     this.disconnectBtn.disabled = !connected;
     this.commandEl.disabled = !connected;
     this.sendBtn.disabled = !connected;
-    if (this.enterBtn) this.enterBtn.disabled = !connected;
-    if (this.ctrlCBtn) this.ctrlCBtn.disabled = !connected;
-    if (this.eofBtn) this.eofBtn.disabled = !connected;
-    if (this.arrowUpBtn) this.arrowUpBtn.disabled = !connected;
-    if (this.arrowDownBtn) this.arrowDownBtn.disabled = !connected;
+    this.enterBtn.disabled = !connected;
     if (connected) this.commandEl.focus();
   }
 
   connect() {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) return;
 
-    setStatus(this.connectingLabel, '');
-    this.append(`[gateway] connecting to ${this.path}...\n`);
+    setStatus('접속 중', '');
+    this.append(`[gateway] ${this.path} 접속 시도...\n`);
 
     this.socket = new WebSocket(wsUrl(this.path));
     this.socket.binaryType = 'arraybuffer';
 
     this.socket.addEventListener('open', () => {
       this.setConnected(true);
-      setStatus(this.connectedLabel, 'online');
-      this.append(`[gateway] connected to ${this.path}.\n`);
+      setStatus('접속됨', 'online');
+      this.append(`[gateway] ${this.path} 접속 완료.\n`);
     });
 
     this.socket.addEventListener('message', (event) => {
@@ -176,23 +146,18 @@ class TerminalSession {
     });
 
     this.socket.addEventListener('close', (event) => {
-      try {
-        const tail = this.decoder.decode();
-        if (tail) this.append(tail);
-      } catch (_) {
-        // ignore decoder flush errors
-      }
+      const reason = event.reason ? `: ${event.reason}` : '';
       this.decoder = new TextDecoder('utf-8', { fatal: false });
       this.setConnected(false);
-      setStatus(this.disconnectedLabel, 'offline');
-      this.append(`\n[gateway] disconnected${event.reason ? `: ${event.reason}` : ''}.\n`);
+      setStatus('연결 종료', 'offline');
+      this.append(`\n[gateway] 연결 종료${reason}.\n`);
       checkStatus();
     });
 
     this.socket.addEventListener('error', () => {
       this.setConnected(false);
-      setStatus(`${this.name} 연결 오류`, 'offline');
-      this.append('\n[gateway] websocket error. 상태 카드와 서버 로그를 확인하세요.\n');
+      setStatus('연결 오류', 'offline');
+      this.append('\n[gateway] WebSocket 연결 오류.\n');
     });
   }
 
@@ -214,7 +179,7 @@ class TerminalSession {
 
   sendRaw(payload) {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      this.append('[gateway] not connected.\n');
+      this.append('[gateway] 아직 접속되지 않았습니다.\n');
       return;
     }
     this.socket.send(payload);
@@ -225,67 +190,25 @@ class TerminalSession {
   }
 }
 
-function formatUptime(seconds) {
-  const value = Number(seconds || 0);
-  const hours = Math.floor(value / 3600);
-  const minutes = Math.floor((value % 3600) / 60);
-  const secs = value % 60;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${secs}s`;
-  return `${secs}s`;
-}
-
-function updateStatusCards(data) {
-  gatewayStateEl.textContent = `정상 · ${formatUptime(data.gateway.uptimeSec)}`;
-
-  if (data.mud.ready) {
-    mudStateEl.textContent = `준비됨 · ${data.mud.target}`;
-  } else {
-    mudStateEl.textContent = data.mud.error ? `미준비 · ${data.mud.error}` : '미준비';
-  }
-
-  if (!data.agent.enabled) {
-    agentStateEl.textContent = '비활성';
-    agentHelpTextEl.textContent = '.env에서 ENABLE_AGENT=1로 켜면 /ws/agent로 AGENT_COMMAND를 실행합니다.';
-  } else if (data.agent.ready) {
-    agentStateEl.textContent = `준비됨 · ${data.agent.command}`;
-    agentHelpTextEl.textContent = `작업 폴더: ${data.agent.workdir}`;
-  } else {
-    agentStateEl.textContent = `미준비 · ${data.agent.error || '확인 필요'}`;
-    agentHelpTextEl.textContent = 'Antigravity CLI 설치 또는 AGENT_COMMAND / AGENT_WORKDIR 설정을 확인하세요.';
-  }
-
-  clientStateEl.textContent = `게임 ${data.mud.activeClients}/${data.mud.maxClients}, AI ${data.agent.activeSessions}/${data.agent.maxSessions}`;
-
-  if (data.mud.ready) setStatus('서버 준비됨', 'online');
-  else setStatus('MUD 미준비', 'offline');
-
-  const parts = [
-    `UI ${APP_VERSION}`,
-    `Gateway ${data.gateway.version || 'unknown'} uptime ${formatUptime(data.gateway.uptimeSec)}`,
-    `MUD ${data.mud.ready ? 'ready' : 'not ready'} (${data.mud.target})`,
-    `AI ${data.agent.enabled ? (data.agent.ready ? 'ready' : 'not ready') : 'disabled'}`
-  ];
-  if (data.mud.error) parts.push(`MUD error: ${data.mud.error}`);
-  if (data.agent.error && data.agent.error !== 'disabled') parts.push(`AI error: ${data.agent.error}`);
-  setDiagnostics(parts.join(' · '));
+function updateStatus(data) {
+  const gateway = data.gateway && data.gateway.version ? `GATEWAY ${data.gateway.version}` : 'GATEWAY 확인';
+  const mud = data.mud && data.mud.ready ? 'MUD 준비됨' : `MUD 미준비${data.mud?.error ? ` - ${data.mud.error}` : ''}`;
+  setDiagnostics(`${gateway}\n${mud}\nUI ${APP_VERSION}`);
+  setStatus(data.mud && data.mud.ready ? '서버 준비됨' : '서버 미준비', data.mud && data.mud.ready ? 'online' : 'offline');
 }
 
 async function checkStatus() {
   setDiagnostics('상태 확인 중...');
   try {
     const res = await fetch('/api/status', { cache: 'no-store' });
-    const data = await res.json();
-    updateStatusCards(data);
+    updateStatus(await res.json());
   } catch (error) {
     setDiagnostics(`상태 확인 실패: ${safeErrorMessage(error)}`);
     setStatus('상태 확인 실패', 'offline');
-    gatewayStateEl.textContent = '확인 실패';
   }
 }
 
 const gameSession = new TerminalSession({
-  name: '게임',
   path: '/ws/mud',
   screenEl: document.getElementById('gameScreen'),
   commandEl: document.getElementById('gameCommand'),
@@ -294,72 +217,12 @@ const gameSession = new TerminalSession({
   disconnectBtn: document.getElementById('gameDisconnect'),
   sendBtn: document.getElementById('gameSend'),
   clearBtn: document.getElementById('gameClear'),
-  enterBtn: document.getElementById('gameEnter'),
-  connectedLabel: '게임 접속됨',
-  connectingLabel: '게임 접속 중',
-  disconnectedLabel: '게임 연결 종료'
+  enterBtn: document.getElementById('gameEnter')
 });
-
-
-const pressAnyKeyBtn = document.getElementById('pressAnyKey');
-const bootScreenEl = document.getElementById('bootScreen');
-if (pressAnyKeyBtn) {
-  pressAnyKeyBtn.addEventListener('click', () => {
-    if (!gameSession.socket || gameSession.socket.readyState !== WebSocket.OPEN) gameSession.connect();
-    else gameSession.sendRaw('\n');
-  });
-}
-if (bootScreenEl) {
-  bootScreenEl.addEventListener('dblclick', () => {
-    if (!gameSession.socket || gameSession.socket.readyState !== WebSocket.OPEN) gameSession.connect();
-  });
-}
-
-const agentSession = new TerminalSession({
-  name: 'AI',
-  path: '/ws/agent',
-  screenEl: document.getElementById('agentScreen'),
-  commandEl: document.getElementById('agentCommand'),
-  formEl: document.getElementById('agentForm'),
-  connectBtn: document.getElementById('agentConnect'),
-  disconnectBtn: document.getElementById('agentDisconnect'),
-  sendBtn: document.getElementById('agentSend'),
-  clearBtn: document.getElementById('agentClear'),
-  enterBtn: document.getElementById('agentEnter'),
-  arrowUpBtn: document.getElementById('agentArrowUp'),
-  arrowDownBtn: document.getElementById('agentArrowDown'),
-  ctrlCBtn: document.getElementById('agentCtrlC'),
-  eofBtn: document.getElementById('agentEof'),
-  lineEnding: '\r',
-  connectedLabel: 'AI 개발 콘솔 연결됨',
-  connectingLabel: 'AI 개발 콘솔 연결 중',
-  disconnectedLabel: 'AI 개발 콘솔 종료'
-});
-
-function showTab(tabName) {
-  for (const button of document.querySelectorAll('.tab')) {
-    button.classList.toggle('active', button.dataset.tab === tabName);
-  }
-  for (const panel of document.querySelectorAll('.tab-panel')) {
-    panel.classList.toggle('active', panel.id === `${tabName}Panel`);
-  }
-
-  if (tabName === 'game') document.getElementById('gameCommand').focus();
-  if (tabName === 'agent') document.getElementById('agentCommand').focus();
-}
-
-for (const button of document.querySelectorAll('.tab')) {
-  button.addEventListener('click', () => showTab(button.dataset.tab));
-}
 
 checkStatusBtn.addEventListener('click', checkStatus);
+window.addEventListener('beforeunload', () => gameSession.closeBeforeUnload());
 
-window.addEventListener('beforeunload', () => {
-  gameSession.closeBeforeUnload();
-  agentSession.closeBeforeUnload();
-});
-
-gameSession.append(`MUHAN NET 01410 · UI ${APP_VERSION}\n무한대전 PC통신 접속 대기 중입니다. [접속] 버튼을 누르면 MUD 서버에 연결됩니다.\n첫 화면에서 [엔터] 또는 [아무키나 누르세요]가 보이면 Enter를 누르세요.\n\n선택> `);
-agentSession.append('ANTIGRAVITY LOCAL DEV CONSOLE\n.env에서 ENABLE_AGENT=1로 켠 뒤 [AI 연결] 버튼을 누르세요. 기본 명령은 agy입니다.\n\nAGY> ');
+gameSession.append(`무한대전 PC통신 접속 대기\n\n1. 접속\n2. 끊기\n3. 엔터\n4. 화면 지우기\n\n선택> `);
 checkStatus();
 setInterval(checkStatus, 10_000);
