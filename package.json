@@ -1,0 +1,16 @@
+{
+  "name": "muhan-web-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-playable web gateway for the MUHAN legacy MUD server.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/server.js",
+    "check": "node --check server/server.js && node --check scripts/wait-for-tcp.js && node --check scripts/healthcheck.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

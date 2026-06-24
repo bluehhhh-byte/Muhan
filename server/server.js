@@ -1,0 +1,411 @@
+'use strict';
+
+const crypto = require('crypto');
+const fs = require('fs');
+const http = require('http');
+const net = require('net');
+const path = require('path');
+const { StringDecoder } = require('string_decoder');
+const { URL } = require('url');
+
+const WEB_HOST = process.env.WEB_HOST || '0.0.0.0';
+const WEB_PORT = Number.parseInt(process.env.WEB_PORT || '8080', 10);
+const MUHAN_HOST = process.env.MUHAN_HOST || '127.0.0.1';
+const MUHAN_PORT = Number.parseInt(process.env.MUHAN_PORT || '4102', 10);
+const WS_PATH = process.env.WS_PATH || '/ws';
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
+const PUBLIC_DIR = path.resolve(__dirname, '..', 'web');
+const MAX_FRAME_SIZE = Number.parseInt(process.env.MAX_FRAME_SIZE || String(64 * 1024), 10);
+const IDLE_TIMEOUT_MS = Number.parseInt(process.env.IDLE_TIMEOUT_MS || String(30 * 60 * 1000), 10);
+
+const MIME_TYPES = new Map([
+  ['.html', 'text/html; charset=utf-8'],
+  ['.css', 'text/css; charset=utf-8'],
+  ['.js', 'application/javascript; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8'],
+  ['.txt', 'text/plain; charset=utf-8'],
+  ['.svg', 'image/svg+xml; charset=utf-8'],
+  ['.ico', 'image/x-icon']
+]);
+
+function json(res, statusCode, payload) {
+  const body = JSON.stringify(payload, null, 2);
+  res.writeHead(statusCode, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body)
+  });
+  res.end(body);
+}
+
+function checkTcp(host, port, timeoutMs = 700) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host, port });
+    let settled = false;
+
+    const finish = (ok, error) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({ ok, error: error ? String(error.message || error) : null });
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false, new Error('timeout')));
+    socket.once('error', (error) => finish(false, error));
+  });
+}
+
+function sendStatic(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  let pathname;
+
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch (_) {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Bad request');
+    return;
+  }
+
+  if (pathname === '/') pathname = '/index.html';
+
+  const filePath = path.resolve(PUBLIC_DIR, `.${pathname}`);
+  if (!filePath.startsWith(PUBLIC_DIR + path.sep) && filePath !== PUBLIC_DIR) {
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Forbidden');
+    return;
+  }
+
+  fs.stat(filePath, (statError, stat) => {
+    if (statError || !stat.isFile()) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('Not found');
+      return;
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, {
+      'content-type': MIME_TYPES.get(ext) || 'application/octet-stream',
+      'cache-control': ext === '.html' ? 'no-store' : 'public, max-age=3600'
+    });
+    fs.createReadStream(filePath).pipe(res);
+  });
+}
+
+function getAccessToken(req) {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const queryToken = url.searchParams.get('token');
+  if (queryToken) return queryToken;
+
+  const headerToken = req.headers['x-access-token'];
+  if (Array.isArray(headerToken)) return headerToken[0] || '';
+  if (headerToken) return headerToken;
+
+  const auth = req.headers.authorization || '';
+  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
+  return '';
+}
+
+function rejectUpgrade(socket, statusCode, message) {
+  const reason = message || http.STATUS_CODES[statusCode] || 'Error';
+  socket.write(
+    `HTTP/1.1 ${statusCode} ${reason}\r\n` +
+      'Connection: close\r\n' +
+      'Content-Type: text/plain; charset=utf-8\r\n' +
+      `Content-Length: ${Buffer.byteLength(reason)}\r\n` +
+      '\r\n' +
+      reason
+  );
+  socket.destroy();
+}
+
+function createAcceptKey(secWebSocketKey) {
+  return crypto
+    .createHash('sha1')
+    .update(secWebSocketKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+    .digest('base64');
+}
+
+class WsTcpBridge {
+  constructor(wsSocket, tcpSocket, options = {}) {
+    this.wsSocket = wsSocket;
+    this.tcpSocket = tcpSocket;
+    this.remoteAddress = options.remoteAddress || 'unknown';
+    this.wsBuffer = Buffer.alloc(0);
+    this.tcpDecoder = new StringDecoder('utf8');
+    this.closed = false;
+    this.lastActiveAt = Date.now();
+    this.fragmentOpcode = null;
+    this.fragmentChunks = [];
+
+    this.idleTimer = null;
+    if (IDLE_TIMEOUT_MS > 0) {
+      this.idleTimer = setInterval(() => {
+        if (Date.now() - this.lastActiveAt > IDLE_TIMEOUT_MS) {
+          this.sendText('\n[gateway] idle timeout: connection closed.\n');
+          this.close();
+        }
+      }, Math.min(IDLE_TIMEOUT_MS, 30_000));
+      this.idleTimer.unref?.();
+    }
+
+    wsSocket.on('data', (chunk) => this.handleWsData(chunk));
+    wsSocket.on('error', () => this.close());
+    wsSocket.on('close', () => this.close());
+    wsSocket.on('end', () => this.close());
+
+    tcpSocket.on('data', (chunk) => {
+      this.lastActiveAt = Date.now();
+      const text = this.tcpDecoder.write(chunk);
+      if (text) this.sendText(text);
+    });
+    tcpSocket.on('error', (error) => {
+      this.sendText(`\n[gateway] MUHAN server error: ${error.message}\n`);
+      this.close();
+    });
+    tcpSocket.on('close', () => {
+      const tail = this.tcpDecoder.end();
+      if (tail) this.sendText(tail);
+      this.sendText('\n[gateway] MUHAN server disconnected.\n');
+      this.close();
+    });
+    tcpSocket.on('end', () => this.close());
+  }
+
+  handleWsData(chunk) {
+    this.lastActiveAt = Date.now();
+    this.wsBuffer = Buffer.concat([this.wsBuffer, chunk]);
+
+    while (this.wsBuffer.length >= 2) {
+      const firstByte = this.wsBuffer[0];
+      const secondByte = this.wsBuffer[1];
+      const fin = (firstByte & 0x80) !== 0;
+      const opcode = firstByte & 0x0f;
+      const masked = (secondByte & 0x80) !== 0;
+      let payloadLength = secondByte & 0x7f;
+      let offset = 2;
+
+      if (payloadLength === 126) {
+        if (this.wsBuffer.length < offset + 2) return;
+        payloadLength = this.wsBuffer.readUInt16BE(offset);
+        offset += 2;
+      } else if (payloadLength === 127) {
+        if (this.wsBuffer.length < offset + 8) return;
+        const bigLength = this.wsBuffer.readBigUInt64BE(offset);
+        if (bigLength > BigInt(Number.MAX_SAFE_INTEGER)) {
+          this.sendClose(1009, 'frame too large');
+          return this.close();
+        }
+        payloadLength = Number(bigLength);
+        offset += 8;
+      }
+
+      if (payloadLength > MAX_FRAME_SIZE) {
+        this.sendClose(1009, 'frame too large');
+        return this.close();
+      }
+
+      if (!masked) {
+        this.sendClose(1002, 'client frames must be masked');
+        return this.close();
+      }
+
+      if (this.wsBuffer.length < offset + 4 + payloadLength) return;
+
+      const mask = this.wsBuffer.subarray(offset, offset + 4);
+      offset += 4;
+      const maskedPayload = this.wsBuffer.subarray(offset, offset + payloadLength);
+      this.wsBuffer = this.wsBuffer.subarray(offset + payloadLength);
+
+      const payload = Buffer.allocUnsafe(payloadLength);
+      for (let i = 0; i < payloadLength; i += 1) {
+        payload[i] = maskedPayload[i] ^ mask[i % 4];
+      }
+
+      this.handleFrame({ fin, opcode, payload });
+      if (this.closed) return;
+    }
+  }
+
+  handleFrame(frame) {
+    const { fin, opcode, payload } = frame;
+
+    if (opcode === 0x8) {
+      this.sendClose(1000, 'closing');
+      return this.close();
+    }
+
+    if (opcode === 0x9) {
+      return this.sendFrame(0xA, payload);
+    }
+
+    if (opcode === 0xA) return;
+
+    if (opcode === 0x0) {
+      if (!this.fragmentOpcode) {
+        this.sendClose(1002, 'unexpected continuation');
+        return this.close();
+      }
+      this.fragmentChunks.push(payload);
+      if (fin) {
+        const message = Buffer.concat(this.fragmentChunks);
+        const messageOpcode = this.fragmentOpcode;
+        this.fragmentOpcode = null;
+        this.fragmentChunks = [];
+        this.forwardPayload(messageOpcode, message);
+      }
+      return;
+    }
+
+    if (opcode !== 0x1 && opcode !== 0x2) {
+      this.sendClose(1003, 'unsupported opcode');
+      return this.close();
+    }
+
+    if (!fin) {
+      this.fragmentOpcode = opcode;
+      this.fragmentChunks = [payload];
+      return;
+    }
+
+    this.forwardPayload(opcode, payload);
+  }
+
+  forwardPayload(opcode, payload) {
+    if (this.closed) return;
+    // Text and binary messages are both forwarded as bytes. The upstream MUHAN
+    // restored server is UTF-8-first, and browser text frames are UTF-8.
+    this.tcpSocket.write(payload);
+  }
+
+  sendText(text) {
+    if (this.closed || !text) return;
+    this.sendFrame(0x1, Buffer.from(text, 'utf8'));
+  }
+
+  sendClose(code, reason) {
+    if (this.closed) return;
+    const reasonBuffer = Buffer.from(String(reason || ''), 'utf8');
+    const payload = Buffer.allocUnsafe(2 + reasonBuffer.length);
+    payload.writeUInt16BE(code || 1000, 0);
+    reasonBuffer.copy(payload, 2);
+    this.sendFrame(0x8, payload);
+  }
+
+  sendFrame(opcode, payload) {
+    if (this.closed || this.wsSocket.destroyed) return;
+    const length = payload.length;
+    let header;
+
+    if (length < 126) {
+      header = Buffer.allocUnsafe(2);
+      header[0] = 0x80 | opcode;
+      header[1] = length;
+    } else if (length <= 0xffff) {
+      header = Buffer.allocUnsafe(4);
+      header[0] = 0x80 | opcode;
+      header[1] = 126;
+      header.writeUInt16BE(length, 2);
+    } else {
+      header = Buffer.allocUnsafe(10);
+      header[0] = 0x80 | opcode;
+      header[1] = 127;
+      header.writeBigUInt64BE(BigInt(length), 2);
+    }
+
+    this.wsSocket.write(Buffer.concat([header, payload]));
+  }
+
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.idleTimer) clearInterval(this.idleTimer);
+    this.wsSocket.destroy();
+    this.tcpSocket.destroy();
+  }
+}
+
+const server = http.createServer(async (req, res) => {
+  if (req.method === 'GET' && req.url.startsWith('/healthz')) {
+    const target = await checkTcp(MUHAN_HOST, MUHAN_PORT);
+    json(res, target.ok ? 200 : 503, {
+      ok: target.ok,
+      gateway: 'muhan-web-runner',
+      target: `${MUHAN_HOST}:${MUHAN_PORT}`,
+      error: target.error
+    });
+    return;
+  }
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Method not allowed');
+    return;
+  }
+
+  sendStatic(req, res);
+});
+
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname !== WS_PATH) {
+    rejectUpgrade(socket, 404, 'WebSocket endpoint not found');
+    return;
+  }
+
+  if (ACCESS_TOKEN && getAccessToken(req) !== ACCESS_TOKEN) {
+    rejectUpgrade(socket, 401, 'Unauthorized');
+    return;
+  }
+
+  if ((req.headers.upgrade || '').toLowerCase() !== 'websocket') {
+    rejectUpgrade(socket, 400, 'Invalid upgrade');
+    return;
+  }
+
+  const secKey = req.headers['sec-websocket-key'];
+  if (!secKey) {
+    rejectUpgrade(socket, 400, 'Missing Sec-WebSocket-Key');
+    return;
+  }
+
+  const target = net.createConnection({ host: MUHAN_HOST, port: MUHAN_PORT });
+  let connected = false;
+
+  target.once('connect', () => {
+    connected = true;
+    const acceptKey = createAcceptKey(secKey);
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+        'Upgrade: websocket\r\n' +
+        'Connection: Upgrade\r\n' +
+        `Sec-WebSocket-Accept: ${acceptKey}\r\n` +
+        '\r\n'
+    );
+
+    const bridge = new WsTcpBridge(socket, target, {
+      remoteAddress: req.socket.remoteAddress
+    });
+
+    if (head && head.length > 0) bridge.handleWsData(head);
+  });
+
+  target.once('error', (error) => {
+    if (!connected) {
+      rejectUpgrade(socket, 503, `MUHAN server unavailable: ${error.message}`);
+    }
+  });
+});
+
+server.listen(WEB_PORT, WEB_HOST, () => {
+  console.log(`[gateway] web: http://${WEB_HOST}:${WEB_PORT}`);
+  console.log(`[gateway] websocket: ${WS_PATH}`);
+  console.log(`[gateway] target: ${MUHAN_HOST}:${MUHAN_PORT}`);
+  if (ACCESS_TOKEN) console.log('[gateway] access token: enabled');
+});
+
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+process.on('SIGINT', () => server.close(() => process.exit(0)));

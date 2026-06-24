@@ -1,0 +1,20 @@
+services:
+  muhan-web:
+    build:
+      context: .
+      args:
+        MUHAN_REPO: ${MUHAN_REPO:-https://github.com/comfuture/muhan.git}
+        MUHAN_REF: ${MUHAN_REF:-master}
+    image: muhan-web-runner:local
+    platform: linux/amd64
+    environment:
+      MUHAN_HOME: /opt/muhan
+      MUHAN_HOST: 127.0.0.1
+      MUHAN_PORT: ${MUHAN_PORT:-4102}
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+      ACCESS_TOKEN: ${ACCESS_TOKEN:-}
+      IDLE_TIMEOUT_MS: ${IDLE_TIMEOUT_MS:-1800000}
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    restart: unless-stopped
