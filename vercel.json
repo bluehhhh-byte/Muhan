@@ -1,5 +1,6 @@
 {
-  "rootDirectory": "web",
+  "buildCommand": "mkdir -p dist && cp -R web/. dist",
+  "outputDirectory": "dist",
   "rewrites": [
     {
       "source": "/version",
