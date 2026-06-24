@@ -1,0 +1,9 @@
+{
+  "rootDirectory": "web",
+  "rewrites": [
+    {
+      "source": "/version",
+      "destination": "/api/version"
+    }
+  ]
+}
