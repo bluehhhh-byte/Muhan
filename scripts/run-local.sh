@@ -7,6 +7,7 @@ set -eu
 : "${WEB_HOST:=0.0.0.0}"
 : "${WEB_PORT:=8080}"
 : "${MUHAN_LOG:=/tmp/muhan-frp.log}"
+: "${MUHAN_START_TIMEOUT_MS:=40000}"
 
 if [ ! -x "$MUHAN_HOME/src/frp.new" ]; then
   echo "Missing executable: $MUHAN_HOME/src/frp.new" >&2
@@ -29,13 +30,15 @@ web_pid=""
 cleanup() {
   if [ -n "$web_pid" ]; then kill "$web_pid" >/dev/null 2>&1 || true; fi
   kill "$muhan_pid" >/dev/null 2>&1 || true
-  pkill -f "$MUHAN_HOME/src/frp.new" >/dev/null 2>&1 || true
+  sleep 1
+  kill -KILL "$muhan_pid" >/dev/null 2>&1 || true
+  pkill -KILL -f "$MUHAN_HOME/src/frp.new" >/dev/null 2>&1 || true
 }
 trap cleanup INT TERM EXIT
 
-if ! node ./scripts/wait-for-tcp.js "$MUHAN_HOST" "$MUHAN_PORT" 20000; then
+if ! node ./scripts/wait-for-tcp.js "$MUHAN_HOST" "$MUHAN_PORT" "$MUHAN_START_TIMEOUT_MS"; then
   echo "MUHAN failed to open TCP. Last log lines:" >&2
-  tail -n 200 "$MUHAN_LOG" >&2 || true
+  tail -n 240 "$MUHAN_LOG" >&2 || true
   exit 1
 fi
 

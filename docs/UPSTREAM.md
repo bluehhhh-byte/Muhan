@@ -1,19 +1,26 @@
-# Upstream MUHAN Source
+# Upstream
 
 Default upstream:
 
 ```text
-https://github.com/comfuture/muhan
+https://github.com/comfuture/muhan.git
 ```
 
-The Dockerfile fetches the upstream repository at build time using:
+Configured by:
 
-```dockerfile
-ARG MUHAN_REPO=https://github.com/comfuture/muhan.git
-ARG MUHAN_REF=master
+```env
+MUHAN_REPO=https://github.com/comfuture/muhan.git
+MUHAN_REF=master
 ```
 
-This wrapper intentionally avoids vendoring the MUHAN source tree. That keeps the
-web gateway small and makes upstream license/copyright boundaries clearer.
+For reproducible deployments, pin `MUHAN_REF` to a commit SHA instead of a branch.
 
-For production, pin `MUHAN_REF` to a commit SHA after testing.
+## Vendoring
+
+`vendor/muhan` is optional. It exists for environments where Docker cannot reach GitHub during build.
+
+```bash
+make fetch-upstream
+```
+
+Before committing vendored upstream code to a public repository, review the upstream rights and license terms. This wrapper repository does not relicense MUHAN itself.

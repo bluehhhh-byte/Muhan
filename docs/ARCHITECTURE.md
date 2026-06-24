@@ -1,52 +1,36 @@
 # Architecture
 
-## Goal
-
-Run the restored MUHAN legacy MUD server as-is, then expose it through a browser.
-
-## Runtime topology
-
 ```text
-+------------------+       WebSocket        +---------------------+
-| Browser terminal |  <------------------>  | Node.js web gateway |
-+------------------+                        +----------+----------+
-                                                       |
-                                                       | TCP
-                                                       v
-                                            +----------------------+
-                                            | MUHAN src/frp.new    |
-                                            | 127.0.0.1:4102       |
-                                            +----------------------+
+Browser
+  └─ WebSocket /ws
+      └─ Node.js gateway
+          └─ TCP 127.0.0.1:4102
+              └─ MUHAN frp.new
 ```
 
-## Why a WebSocket gateway?
+The browser never talks to the MUHAN TCP port directly. It connects to the Node gateway over WebSocket. The gateway opens a TCP connection to the legacy MUHAN server and relays bytes both ways.
 
-The legacy server speaks TCP. Browsers cannot open raw TCP sockets, so the web client talks WebSocket and the Node gateway forwards byte streams to the local MUD process.
+## Why not rewrite MUHAN as a web app?
+
+The C server already owns the game loop, player persistence, room/object data, combat, and command parser. This project keeps that logic intact and adds a transport adapter around it.
 
 ## Process model
 
-The Docker entrypoint starts MUHAN from the repository root, matching the upstream smoke-test style:
+The container starts two processes under `docker/entrypoint.sh`:
 
-```sh
-cd "$MUHAN_HOME"
-export MUHAN_HOME
-./src/frp.new -r "$MUHAN_PORT"
-```
+1. `MUHAN_HOME/src/frp.new -r MUHAN_PORT`
+2. `node /app/server/server.js`
 
-It also creates `/home/muhan -> $MUHAN_HOME` because legacy paths and restored scripts can still assume that location.
+The entrypoint supervises the MUHAN TCP port and exits if the target becomes unreachable several times in a row.
 
-The entrypoint then starts `node /app/server/server.js`. Liveness is checked by probing the MUHAN TCP port, not only by the first process PID, because old MUD builds may daemonize/fork depending on compile flags.
+## Health endpoints
 
-## Encoding and telnet handling
+- `/healthz`: gateway-only health by default. This is used by Docker healthcheck.
+- `/readyz`: gateway + MUHAN TCP readiness.
+- `/api/status`: same target readiness JSON used by the browser diagnostics panel.
 
-The gateway forwards browser text frames to MUHAN as UTF-8 bytes. MUHAN output is sent back to the browser as binary WebSocket frames, so multi-byte Korean text is not prematurely decoded in Node.
+`HEALTHCHECK_TARGET=1` makes `/healthz` also probe the MUHAN TCP target, but the default is `0` to avoid periodic healthcheck connections becoming visible to the MUD as short-lived clients.
 
-`TELNET_FILTER=1` is enabled by default. It removes basic telnet IAC negotiation bytes from visible browser output and replies conservatively with `DONT/WONT` where needed. Set `TELNET_FILTER=0` to pass raw bytes through while debugging.
+## Telnet negotiation
 
-The browser UI strips common ANSI control sequences by default, but the toggle can be disabled.
-
-## Authentication
-
-This is intentionally minimal. If `ACCESS_TOKEN` is set, WebSocket upgrades must include the same token via the `token` query parameter or an `Authorization: Bearer` header. Static HTML is still public, but game sessions are blocked.
-
-For real public hosting, put the service behind HTTPS and a reverse proxy.
+The gateway includes a small telnet IAC filter. By default it rejects server telnet options with DONT/WONT and strips negotiation bytes from browser output. Set `TELNET_FILTER=0` to disable this behavior.

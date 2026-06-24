@@ -5,7 +5,10 @@ const statusEl = document.getElementById('status');
 const tokenEl = document.getElementById('token');
 const connectBtn = document.getElementById('connect');
 const disconnectBtn = document.getElementById('disconnect');
+const sendEnterBtn = document.getElementById('sendEnter');
 const clearBtn = document.getElementById('clear');
+const checkStatusBtn = document.getElementById('checkStatus');
+const diagnosticsEl = document.getElementById('diagnostics');
 const commandForm = document.getElementById('commandForm');
 const commandEl = document.getElementById('command');
 const sendBtn = document.getElementById('send');
@@ -26,6 +29,10 @@ if (savedToken) tokenEl.value = savedToken;
 function setStatus(text, className) {
   statusEl.textContent = text;
   statusEl.className = `status ${className || ''}`.trim();
+}
+
+function setDiagnostics(text) {
+  diagnosticsEl.textContent = text;
 }
 
 function stripAnsi(text) {
@@ -69,6 +76,7 @@ function clearScreen() {
 function setConnected(connected) {
   connectBtn.disabled = connected;
   disconnectBtn.disabled = !connected;
+  sendEnterBtn.disabled = !connected;
   commandEl.disabled = !connected;
   sendBtn.disabled = !connected;
   if (connected) commandEl.focus();
@@ -80,6 +88,24 @@ function wsUrl() {
   const token = tokenEl.value.trim();
   if (token) url.searchParams.set('token', token);
   return url;
+}
+
+async function checkStatus() {
+  setDiagnostics('상태 확인 중...');
+  try {
+    const res = await fetch('/api/status', { cache: 'no-store' });
+    const data = await res.json();
+    const ready = data.targetReady ? 'MUD 준비됨' : 'MUD 미준비';
+    const clients = `접속 ${data.activeClients}/${data.maxClients}`;
+    const error = data.targetError ? `, 오류: ${data.targetError}` : '';
+    setDiagnostics(`${ready}, ${clients}, 대상 ${data.target}${error}`);
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setStatus(data.targetReady ? '서버 준비됨' : '서버 미준비', data.targetReady ? 'online' : 'offline');
+    }
+  } catch (error) {
+    setDiagnostics(`상태 확인 실패: ${error.message}`);
+    if (!socket || socket.readyState !== WebSocket.OPEN) setStatus('상태 확인 실패', 'offline');
+  }
 }
 
 function connect() {
@@ -98,7 +124,7 @@ function connect() {
   socket.addEventListener('open', () => {
     setConnected(true);
     setStatus('접속됨', 'online');
-    appendText('[gateway] connected.\n');
+    appendText('[gateway] connected. 첫 화면에서 “[엔터]”가 보이면 Enter를 누르세요.\n');
   });
 
   socket.addEventListener('message', async (event) => {
@@ -120,12 +146,13 @@ function connect() {
     setConnected(false);
     setStatus('연결 종료', 'offline');
     appendText(`\n[gateway] disconnected${event.reason ? `: ${event.reason}` : ''}.\n`);
+    checkStatus();
   });
 
   socket.addEventListener('error', () => {
     setConnected(false);
     setStatus('연결 오류', 'offline');
-    appendText('\n[gateway] websocket error.\n');
+    appendText('\n[gateway] websocket error. 서버 로그와 /api/status를 확인하세요.\n');
   });
 }
 
@@ -152,7 +179,9 @@ function sendCommand(command) {
 
 connectBtn.addEventListener('click', connect);
 disconnectBtn.addEventListener('click', disconnect);
+sendEnterBtn.addEventListener('click', () => sendCommand(''));
 clearBtn.addEventListener('click', clearScreen);
+checkStatusBtn.addEventListener('click', checkStatus);
 
 commandForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -188,5 +217,6 @@ window.addEventListener('beforeunload', () => {
   if (socket && socket.readyState === WebSocket.OPEN) socket.close(1000, 'page unload');
 });
 
-appendText('무한대전 Web Runner\n접속 버튼을 눌러 서버에 연결하세요.\n\n');
+appendText('무한대전 Web Runner\n접속 버튼을 눌러 서버에 연결하세요. 상태 점검 버튼으로 MUD 포트 준비 상태를 확인할 수 있습니다.\n\n');
 setConnected(false);
+checkStatus();

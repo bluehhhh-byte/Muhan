@@ -16,7 +16,14 @@ const ACCESS_TOKEN = process.env.ACCESS_TOKEN || '';
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'web');
 const MAX_FRAME_SIZE = Number.parseInt(process.env.MAX_FRAME_SIZE || String(64 * 1024), 10);
 const IDLE_TIMEOUT_MS = Number.parseInt(process.env.IDLE_TIMEOUT_MS || String(30 * 60 * 1000), 10);
+const TCP_CONNECT_TIMEOUT_MS = Number.parseInt(process.env.TCP_CONNECT_TIMEOUT_MS || '5000', 10);
+const MAX_CLIENTS = Number.parseInt(process.env.MAX_CLIENTS || '20', 10);
 const TELNET_FILTER = process.env.TELNET_FILTER !== '0';
+const HEALTHCHECK_TARGET = process.env.HEALTHCHECK_TARGET === '1';
+
+let activeClients = 0;
+let totalClients = 0;
+const startedAt = new Date();
 
 const MIME_TYPES = new Map([
   ['.html', 'text/html; charset=utf-8'],
@@ -28,14 +35,15 @@ const MIME_TYPES = new Map([
   ['.ico', 'image/x-icon']
 ]);
 
-function json(res, statusCode, payload) {
+function json(res, statusCode, payload, req) {
   const body = JSON.stringify(payload, null, 2);
   res.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body)
   });
-  res.end(body);
+  if (req && req.method === 'HEAD') res.end();
+  else res.end(body);
 }
 
 function checkTcp(host, port, timeoutMs = 700) {
@@ -55,6 +63,31 @@ function checkTcp(host, port, timeoutMs = 700) {
     socket.once('timeout', () => finish(false, new Error('timeout')));
     socket.once('error', (error) => finish(false, error));
   });
+}
+
+async function statusPayload(includeTarget) {
+  const payload = {
+    ok: true,
+    gateway: 'muhan-web-runner',
+    startedAt: startedAt.toISOString(),
+    uptimeSec: Math.round(process.uptime()),
+    websocketPath: WS_PATH,
+    target: `${MUHAN_HOST}:${MUHAN_PORT}`,
+    activeClients,
+    totalClients,
+    maxClients: MAX_CLIENTS,
+    telnetFilter: TELNET_FILTER,
+    accessTokenRequired: Boolean(ACCESS_TOKEN)
+  };
+
+  if (includeTarget) {
+    const target = await checkTcp(MUHAN_HOST, MUHAN_PORT, Math.min(TCP_CONNECT_TIMEOUT_MS, 1500));
+    payload.targetReady = target.ok;
+    payload.targetError = target.error;
+    payload.ok = target.ok;
+  }
+
+  return payload;
 }
 
 function sendStatic(req, res) {
@@ -88,9 +121,12 @@ function sendStatic(req, res) {
     const ext = path.extname(filePath).toLowerCase();
     res.writeHead(200, {
       'content-type': MIME_TYPES.get(ext) || 'application/octet-stream',
-      'cache-control': ext === '.html' ? 'no-store' : 'public, max-age=3600'
+      'cache-control': ext === '.html' ? 'no-store' : 'public, max-age=3600',
+      'content-length': stat.size
     });
-    fs.createReadStream(filePath).pipe(res);
+
+    if (req.method === 'HEAD') res.end();
+    else fs.createReadStream(filePath).pipe(res);
   });
 }
 
@@ -111,7 +147,7 @@ function getAccessToken(req) {
 function rejectUpgrade(socket, statusCode, message) {
   const reason = message || http.STATUS_CODES[statusCode] || 'Error';
   socket.write(
-    `HTTP/1.1 ${statusCode} ${reason}\r\n` +
+    `HTTP/1.1 ${statusCode} ${http.STATUS_CODES[statusCode] || 'Error'}\r\n` +
       'Connection: close\r\n' +
       'Content-Type: text/plain; charset=utf-8\r\n' +
       `Content-Length: ${Buffer.byteLength(reason)}\r\n` +
@@ -127,7 +163,6 @@ function createAcceptKey(secWebSocketKey) {
     .update(secWebSocketKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
     .digest('base64');
 }
-
 
 class TelnetFilter {
   constructor(tcpSocket) {
@@ -172,8 +207,6 @@ class TelnetFilter {
         // Minimal telnet negotiation for browser clients:
         //   server WILL x -> client DONT x
         //   server DO x   -> client WONT x
-        // This keeps MUHAN usable over a browser WebSocket without leaking IAC
-        // bytes into the visible terminal output.
         if (this.command === 251) this.reply(254, byte); // WILL -> DONT
         if (this.command === 253) this.reply(252, byte); // DO   -> WONT
         this.command = 0;
@@ -206,6 +239,7 @@ class WsTcpBridge {
     this.wsSocket = wsSocket;
     this.tcpSocket = tcpSocket;
     this.remoteAddress = options.remoteAddress || 'unknown';
+    this.onClose = typeof options.onClose === 'function' ? options.onClose : () => {};
     this.wsBuffer = Buffer.alloc(0);
     this.telnetFilter = new TelnetFilter(tcpSocket);
     this.closed = false;
@@ -218,7 +252,8 @@ class WsTcpBridge {
       this.idleTimer = setInterval(() => {
         if (Date.now() - this.lastActiveAt > IDLE_TIMEOUT_MS) {
           this.sendText('\n[gateway] idle timeout: connection closed.\n');
-          this.close();
+          this.sendClose(1000, 'idle timeout');
+          this.closeSoon();
         }
       }, Math.min(IDLE_TIMEOUT_MS, 30_000));
       this.idleTimer.unref?.();
@@ -236,18 +271,25 @@ class WsTcpBridge {
     });
     tcpSocket.on('error', (error) => {
       this.sendText(`\n[gateway] MUHAN server error: ${error.message}\n`);
-      this.close();
+      this.sendClose(1011, 'MUHAN server error');
+      this.closeSoon();
     });
     tcpSocket.on('close', () => {
       this.sendText('\n[gateway] MUHAN server disconnected.\n');
-      this.close();
+      this.sendClose(1011, 'MUHAN server disconnected');
+      this.closeSoon();
     });
-    tcpSocket.on('end', () => this.close());
+    tcpSocket.on('end', () => this.closeSoon());
   }
 
   handleWsData(chunk) {
     this.lastActiveAt = Date.now();
     this.wsBuffer = Buffer.concat([this.wsBuffer, chunk]);
+
+    if (this.wsBuffer.length > MAX_FRAME_SIZE + 14) {
+      this.sendClose(1009, 'frame too large');
+      return this.closeSoon();
+    }
 
     while (this.wsBuffer.length >= 2) {
       const firstByte = this.wsBuffer[0];
@@ -267,7 +309,7 @@ class WsTcpBridge {
         const bigLength = this.wsBuffer.readBigUInt64BE(offset);
         if (bigLength > BigInt(Number.MAX_SAFE_INTEGER)) {
           this.sendClose(1009, 'frame too large');
-          return this.close();
+          return this.closeSoon();
         }
         payloadLength = Number(bigLength);
         offset += 8;
@@ -275,12 +317,12 @@ class WsTcpBridge {
 
       if (payloadLength > MAX_FRAME_SIZE) {
         this.sendClose(1009, 'frame too large');
-        return this.close();
+        return this.closeSoon();
       }
 
       if (!masked) {
         this.sendClose(1002, 'client frames must be masked');
-        return this.close();
+        return this.closeSoon();
       }
 
       if (this.wsBuffer.length < offset + 4 + payloadLength) return;
@@ -305,19 +347,16 @@ class WsTcpBridge {
 
     if (opcode === 0x8) {
       this.sendClose(1000, 'closing');
-      return this.close();
+      return this.closeSoon();
     }
 
-    if (opcode === 0x9) {
-      return this.sendFrame(0xA, payload);
-    }
-
+    if (opcode === 0x9) return this.sendFrame(0xA, payload);
     if (opcode === 0xA) return;
 
     if (opcode === 0x0) {
       if (!this.fragmentOpcode) {
         this.sendClose(1002, 'unexpected continuation');
-        return this.close();
+        return this.closeSoon();
       }
       this.fragmentChunks.push(payload);
       if (fin) {
@@ -332,7 +371,7 @@ class WsTcpBridge {
 
     if (opcode !== 0x1 && opcode !== 0x2) {
       this.sendClose(1003, 'unsupported opcode');
-      return this.close();
+      return this.closeSoon();
     }
 
     if (!fin) {
@@ -345,7 +384,7 @@ class WsTcpBridge {
   }
 
   forwardPayload(opcode, payload) {
-    if (this.closed) return;
+    if (this.closed || !payload || payload.length === 0) return;
     // Text and binary messages are both forwarded as bytes. The upstream MUHAN
     // restored server is UTF-8-first, and browser text frames are UTF-8.
     this.tcpSocket.write(payload);
@@ -394,24 +433,32 @@ class WsTcpBridge {
     this.wsSocket.write(Buffer.concat([header, payload]));
   }
 
+  closeSoon() {
+    setTimeout(() => this.close(), 80).unref?.();
+  }
+
   close() {
     if (this.closed) return;
     this.closed = true;
     if (this.idleTimer) clearInterval(this.idleTimer);
     this.wsSocket.destroy();
     this.tcpSocket.destroy();
+    this.onClose();
   }
 }
 
 const server = http.createServer(async (req, res) => {
-  if (req.method === 'GET' && req.url.startsWith('/healthz')) {
-    const target = await checkTcp(MUHAN_HOST, MUHAN_PORT);
-    json(res, target.ok ? 200 : 503, {
-      ok: target.ok,
-      gateway: 'muhan-web-runner',
-      target: `${MUHAN_HOST}:${MUHAN_PORT}`,
-      error: target.error
-    });
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/healthz') {
+    const payload = await statusPayload(HEALTHCHECK_TARGET);
+    json(res, payload.ok ? 200 : 503, payload, req);
+    return;
+  }
+
+  if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/readyz' || url.pathname === '/api/status')) {
+    const payload = await statusPayload(true);
+    json(res, payload.ok ? 200 : 503, payload, req);
     return;
   }
 
@@ -442,17 +489,45 @@ server.on('upgrade', (req, socket, head) => {
     return;
   }
 
+  if (!String(req.headers.connection || '').toLowerCase().split(',').map((v) => v.trim()).includes('upgrade')) {
+    rejectUpgrade(socket, 400, 'Invalid connection header');
+    return;
+  }
+
+  if (req.headers['sec-websocket-version'] !== '13') {
+    rejectUpgrade(socket, 426, 'Unsupported WebSocket version');
+    return;
+  }
+
   const secKey = req.headers['sec-websocket-key'];
   if (!secKey) {
     rejectUpgrade(socket, 400, 'Missing Sec-WebSocket-Key');
     return;
   }
 
+  if (MAX_CLIENTS > 0 && activeClients >= MAX_CLIENTS) {
+    rejectUpgrade(socket, 429, 'Too many clients');
+    return;
+  }
+
   const target = net.createConnection({ host: MUHAN_HOST, port: MUHAN_PORT });
   let connected = false;
+  let rejected = false;
+
+  const rejectTarget = (error) => {
+    if (connected || rejected) return;
+    rejected = true;
+    target.destroy();
+    rejectUpgrade(socket, 503, `MUHAN server unavailable: ${error.message}`);
+  };
+
+  target.setTimeout(TCP_CONNECT_TIMEOUT_MS);
+  target.once('timeout', () => rejectTarget(new Error('target connect timeout')));
+  target.once('error', rejectTarget);
 
   target.once('connect', () => {
     connected = true;
+    target.setTimeout(0);
     const acceptKey = createAcceptKey(secKey);
     socket.write(
       'HTTP/1.1 101 Switching Protocols\r\n' +
@@ -462,17 +537,16 @@ server.on('upgrade', (req, socket, head) => {
         '\r\n'
     );
 
+    activeClients += 1;
+    totalClients += 1;
     const bridge = new WsTcpBridge(socket, target, {
-      remoteAddress: req.socket.remoteAddress
+      remoteAddress: req.socket.remoteAddress,
+      onClose: () => {
+        activeClients = Math.max(0, activeClients - 1);
+      }
     });
 
     if (head && head.length > 0) bridge.handleWsData(head);
-  });
-
-  target.once('error', (error) => {
-    if (!connected) {
-      rejectUpgrade(socket, 503, `MUHAN server unavailable: ${error.message}`);
-    }
   });
 });
 
@@ -480,8 +554,10 @@ server.listen(WEB_PORT, WEB_HOST, () => {
   console.log(`[gateway] web: http://${WEB_HOST}:${WEB_PORT}`);
   console.log(`[gateway] websocket: ${WS_PATH}`);
   console.log(`[gateway] target: ${MUHAN_HOST}:${MUHAN_PORT}`);
+  console.log(`[gateway] max clients: ${MAX_CLIENTS}`);
   if (ACCESS_TOKEN) console.log('[gateway] access token: enabled');
   console.log(`[gateway] telnet filter: ${TELNET_FILTER ? 'enabled' : 'disabled'}`);
+  console.log(`[gateway] healthcheck target probe: ${HEALTHCHECK_TARGET ? 'enabled' : 'disabled'}`);
 });
 
 process.on('SIGTERM', () => server.close(() => process.exit(0)));

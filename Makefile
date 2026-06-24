@@ -1,10 +1,13 @@
-.PHONY: check test run build logs down clean doctor
+.PHONY: check test run build logs down clean doctor fetch-upstream
 
 check:
 	npm run check
 
 test:
 	npm test
+
+fetch-upstream:
+	./scripts/fetch-upstream.sh
 
 build:
 	docker compose build
@@ -16,8 +19,7 @@ logs:
 	docker compose logs -f
 
 doctor:
-	docker compose ps
-	docker compose logs --tail=200
+	./scripts/doctor.sh
 
 down:
 	docker compose down

@@ -1,29 +1,23 @@
-# Security Notes
+# Security notes
 
-This project is a thin web gateway around a legacy game server. Treat it as a
-public network service.
+This project exposes an old MUD server through a browser-friendly WebSocket gateway. Treat it as an internet-facing legacy service.
 
-## Defaults
+## Minimum public-hosting checklist
 
-- The raw MUHAN TCP port is not published by Docker Compose.
-- Only the web gateway port is exposed.
-- `ACCESS_TOKEN` can gate WebSocket sessions.
-- Idle sessions close after `IDLE_TIMEOUT_MS`.
-- Browser-originated WebSocket frames are limited by `MAX_FRAME_SIZE`.
+- Set `ACCESS_TOKEN` in `.env`.
+- Put the service behind HTTPS/WSS.
+- Keep `MAX_CLIENTS` conservative.
+- Do not expose the raw MUHAN TCP port to the internet unless you intend to support telnet clients directly.
+- Keep server logs private; player names and commands may appear in logs depending on upstream settings.
+- Pin `MUHAN_REF` to a reviewed commit for production.
 
-## Before public hosting
+## Authentication model
 
-1. Set `ACCESS_TOKEN`.
-2. Use HTTPS through a reverse proxy.
-3. Keep the service inside a container.
-4. Back up `player/`, `post/`, and any persistent game data if you later mount volumes.
-5. Consider adding rate limiting at the reverse proxy.
+The built-in token check is a simple gate, not an account system. It is enough for a private friends-only server behind HTTPS, but not a full public authentication layer.
 
-## Not implemented
+## WebSocket gateway limits
 
-- Account system outside the MUD itself
-- Admin dashboard
-- TLS termination inside the Node process
-- Persistent volume layout for production character data
-
-Those can be added later without changing the core gateway design.
+- Client frames must be masked.
+- Oversized frames are rejected.
+- Idle clients are disconnected after `IDLE_TIMEOUT_MS`.
+- `MAX_CLIENTS` limits concurrent WebSocket sessions.
