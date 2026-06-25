@@ -16,9 +16,16 @@ module.exports = async function handler(req, res) {
   }
 
   const { apiKey, model, input, systemInstruction, previousInteractionId } = body;
-  const requestApiKey = apiKey || process.env.GEMINI_API_KEY;
+  const requestApiKey = String(apiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '').trim();
   if (!requestApiKey || !input) {
-    res.status(400).json({ error: 'missing_api_key_or_input', message: 'Gemini API key is missing. Enter it in settings or set GEMINI_API_KEY in Vercel.' });
+    res.status(400).json({
+      error: 'missing_api_key_or_input',
+      message: 'Gemini API key is missing. Enter it in settings or set GEMINI_API_KEY or GOOGLE_API_KEY in Vercel.',
+      env: {
+        GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
+        GOOGLE_API_KEY: Boolean(process.env.GOOGLE_API_KEY)
+      }
+    });
     return;
   }
 
