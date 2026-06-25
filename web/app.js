@@ -3,8 +3,9 @@
 const MAX_LINES = 700;
 const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
+const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.6';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.7';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -181,6 +182,27 @@ function clearScreen() {
 
 function appendNeko(text) {
   append(`네코: ${text}`, 'neko');
+}
+
+function saveGameState() {
+  try {
+    localStorage.setItem(GAME_STATE_KEY, JSON.stringify({ roomName, team }));
+  } catch (error) {
+    // 저장소가 막힌 브라우저에서는 현재 세션만 유지한다.
+  }
+}
+
+function loadGameState() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(GAME_STATE_KEY) || '{}');
+  } catch (error) {
+    return;
+  }
+  if (rooms[saved.roomName]) roomName = saved.roomName;
+  if (Array.isArray(saved.team)) {
+    team = saved.team.filter((name, index, list) => names.includes(name) && list.indexOf(name) === index).slice(0, 4);
+  }
 }
 
 function renderStatusPanel() {
@@ -409,6 +431,7 @@ function move(destination) {
 
   roomName = target;
   renderStatusPanel();
+  saveGameState();
   append(`${roomName}(으)로 이동했다.`);
   if (team.length) append(`${team.join(', ')}: 같이 이동했어.`);
   look();
@@ -430,6 +453,7 @@ function teamUp(query) {
   }
   team.push(name);
   renderStatusPanel();
+  saveGameState();
   append(`${name}: 좋아, 같이 가자.`, 'ally');
   append(`현재 팀: ${team.join(', ')}`);
 }
@@ -437,11 +461,12 @@ function teamUp(query) {
 function clearTeam() {
   team = [];
   renderStatusPanel();
+  saveGameState();
   append('팀을 해산했습니다.');
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n도움              이 안내\n보기              현재 장소 보기\n상태              캐릭터 상태 갱신\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀                현재 팀 보기\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n설정              설정창 보기\n랜덤              네코 설정 랜덤 생성\n설계도            게임 설계 요약\n\n예) 네코 어디로 가야 해?\n예) 1\n예) 팀 검객루안`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n도움              이 안내\n보기              현재 장소 보기\n상태              캐릭터 상태 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀                현재 팀 보기\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n설정              설정창 보기\n랜덤              네코 설정 랜덤 생성\n설계도            게임 설계 요약\n\n예) 네코 어디로 가야 해?\n예) 1\n예) 팀 검객루안`);
 }
 
 function blueprint() {
@@ -461,6 +486,7 @@ function connect() {
 
   setConnected(true);
   renderStatusPanel();
+  saveGameState();
   setStatus('입장 완료', 'online');
   setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '브라우저 키 사용' : '서버 키 확인 대기'}\nAI 유저 100명 / 팀업 가능`);
   clearScreen();
@@ -501,6 +527,10 @@ async function runCommand(raw) {
   if (['도움', 'help', '?', '명령'].includes(command)) help();
   else if (['보기', 'look', 'l'].includes(command)) look();
   else if (['상태', '스탯', '장비', '아이템', 'status', 'stat'].includes(command)) renderStatusPanel();
+  else if (['저장', 'save'].includes(command)) {
+    saveGameState();
+    append('현재 위치와 팀 상태를 저장했습니다.');
+  }
   else if (['유저', '누구', 'users'].includes(command)) listUsers();
   else if (['말', '채팅', 'say'].includes(command)) say(body);
   else if (['귓', '귓속말', 'tell'].includes(command)) whisper(body);
@@ -554,9 +584,13 @@ commandEl.addEventListener('keydown', (event) => {
   }
 });
 
-window.addEventListener('beforeunload', () => window.clearInterval(tickTimer));
+window.addEventListener('beforeunload', () => {
+  saveGameState();
+  window.clearInterval(tickTimer);
+});
 
 loadSettings();
+loadGameState();
 setConnected(false);
 renderStatusPanel();
 setStatus('입장 대기', '');
