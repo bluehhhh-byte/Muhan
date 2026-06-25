@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.9';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -45,29 +45,68 @@ const names = [
 ];
 
 const rooms = {
-  '중앙광장': { exits: ['북문', '주막', '수련장'], desc: '푸른 전광판 아래에 접속자 명단이 흐르고 있다.' },
-  '북문': { exits: ['중앙광장', '초보사냥터'], desc: '성문 밖에서 낮은 북소리가 들린다.' },
+  '중앙광장': { exits: ['북문', '주막', '수련장', '현감청', '생명의나무'], desc: '푸른 전광판과 오래된 향로가 있는 시작 광장이다.' },
+  '북문': { exits: ['중앙광장', '초보사냥터'], desc: '성문 밖에서 낮은 북소리가 들리고 경비가 길을 막고 있다.' },
   '주막': { exits: ['중앙광장', '장터'], desc: '소문과 농담이 가장 빨리 모이는 곳이다.' },
   '수련장': { exits: ['중앙광장'], desc: '낡은 목검과 허수아비가 줄지어 서 있다.' },
+  '현감청': { exits: ['중앙광장'], desc: '초보 모험가에게 첫 임무를 내리는 관아다.' },
+  '생명의나무': { exits: ['중앙광장', '초보사냥터'], desc: '새 모험가들이 길을 묻는 거대한 나무가 뿌리를 드리우고 있다.' },
   '장터': { exits: ['주막'], desc: '상인들이 회복약과 낡은 장비를 펼쳐 놓았다.' },
-  '초보사냥터': { exits: ['북문'], desc: '작은 괴물의 발자국이 흙길 위에 남아 있다.' }
+  '초보사냥터': { exits: ['북문', '생명의나무'], desc: '작은 괴물의 발자국이 흙길 위에 남아 있다.' }
 };
 
 const character = {
   name: '무명초보',
   job: '초보검객',
+  title: '초보',
   level: 1,
-  hp: '38/38',
-  mp: '12/12',
-  exp: '0%',
-  gold: 120,
+  hp: 38,
+  hpMax: 38,
+  mp: 12,
+  mpMax: 12,
+  exp: 0,
+  expToLevel: 512,
+  gold: 500,
+  storyStep: 0,
   equipment: {
     무기: '낡은 목검',
     방어구: '수련복',
     장신구: '푸른 접속패',
     동료: '네코'
   },
-  inventory: ['회복약 x3', '귀환부 x1', '낡은 지도 조각', '주막 쿠폰']
+  inventory: ['회복약', '회복약', '회복약', '귀환부', '낡은 지도 조각', '주막 쿠폰']
+};
+
+const story = [
+  { title: '환영 읽기', goal: '광장에서 환영 안내를 읽어라.', hint: '환영' },
+  { title: '첫 임무', goal: '현감청에서 현감과 대화해 첫 임무를 받아라.', hint: '이동 현감청 → 대화 현감' },
+  { title: '발자국 조사', goal: '초보사냥터에서 작은 괴물을 사냥해 증거를 얻어라.', hint: '이동 초보사냥터 → 사냥' },
+  { title: '첫 수련', goal: '경험과 돈을 모아 수련장에서 2레벨이 되어라.', hint: '이동 수련장 → 수련' },
+  { title: '생명의나무', goal: '생명의나무의 안내자와 대화해 북문 단서를 확인하라.', hint: '이동 생명의나무 → 대화 안내자' },
+  { title: '북문 조사', goal: '북문을 조사해 다음 장의 길을 열어라.', hint: '이동 북문 → 조사' },
+  { title: '열린 대전', goal: '사냥, 수련, 대화, 팀업을 반복해 더 깊은 지역을 준비하라.', hint: '임무 / 사냥 / 수련 / 네코' }
+];
+
+const roomNpcs = {
+  '중앙광장': ['전광판 관리인', '떠돌이 도우미'],
+  '현감청': ['현감'],
+  '생명의나무': ['안내자'],
+  '주막': ['주모', '소문꾼'],
+  '장터': ['약장수'],
+  '북문': ['북문 경비'],
+  '초보사냥터': ['겁먹은 나그네'],
+  '수련장': ['수련 교관']
+};
+
+const roomEncounters = {
+  '초보사냥터': [
+    { name: '들쥐', hp: 10, exp: 120, gold: 35, item: '작은 송곳니' },
+    { name: '흙도깨비', hp: 16, exp: 180, gold: 55, item: '짐승의 발톱' },
+    { name: '떠도는 그림자', hp: 22, exp: 240, gold: 75, item: '낡은 부적 조각' }
+  ],
+  '북문': [
+    { name: '성문 박쥐', hp: 18, exp: 160, gold: 45, item: '박쥐 날개' }
+  ]
 };
 
 const chatter = [
@@ -183,9 +222,34 @@ function appendNeko(text) {
   append(`네코: ${text}`, 'neko');
 }
 
+function expForLevel(level) {
+  return 512 * (2 ** Math.max(0, Math.min(level - 1, 8)));
+}
+
+function currentQuest() {
+  return story[Math.min(character.storyStep, story.length - 1)];
+}
+
 function saveGameState() {
   try {
-    localStorage.setItem(GAME_STATE_KEY, JSON.stringify({ roomName, team }));
+    localStorage.setItem(GAME_STATE_KEY, JSON.stringify({
+      roomName,
+      team,
+      character: {
+        title: character.title,
+        level: character.level,
+        hp: character.hp,
+        hpMax: character.hpMax,
+        mp: character.mp,
+        mpMax: character.mpMax,
+        exp: character.exp,
+        expToLevel: character.expToLevel,
+        gold: character.gold,
+        storyStep: character.storyStep,
+        equipment: character.equipment,
+        inventory: character.inventory
+      }
+    }));
   } catch (error) {
     // 저장소가 막힌 브라우저에서는 현재 세션만 유지한다.
   }
@@ -202,6 +266,22 @@ function loadGameState() {
   if (Array.isArray(saved.team)) {
     team = saved.team.filter((name, index, list) => names.includes(name) && list.indexOf(name) === index).slice(0, 4);
   }
+  if (saved.character && typeof saved.character === 'object') {
+    for (const key of ['title', 'level', 'hp', 'hpMax', 'mp', 'mpMax', 'exp', 'expToLevel', 'gold', 'storyStep']) {
+      if (saved.character[key] !== undefined) character[key] = saved.character[key];
+    }
+    if (saved.character.equipment && typeof saved.character.equipment === 'object') character.equipment = saved.character.equipment;
+    if (Array.isArray(saved.character.inventory)) character.inventory = saved.character.inventory;
+  }
+  character.level = Math.max(1, Number(character.level) || 1);
+  character.hpMax = Math.max(1, Number(character.hpMax) || 38);
+  character.mpMax = Math.max(0, Number(character.mpMax) || 12);
+  character.hp = Math.min(character.hpMax, Math.max(1, Number(character.hp) || character.hpMax));
+  character.mp = Math.min(character.mpMax, Math.max(0, Number(character.mp) || character.mpMax));
+  character.exp = Math.max(0, Number(character.exp) || 0);
+  character.expToLevel = Math.max(1, Number(character.expToLevel) || expForLevel(character.level));
+  character.gold = Math.max(0, Number(character.gold) || 0);
+  character.storyStep = Math.max(0, Math.min(story.length - 1, Number(character.storyStep) || 0));
 }
 
 function renderStatusPanel() {
@@ -209,13 +289,18 @@ function renderStatusPanel() {
     '[캐릭터]',
     `이름: ${character.name}`,
     `직업: ${character.job}`,
+    `칭호: ${character.title}`,
     `레벨: ${character.level}`,
-    `HP: ${character.hp}`,
-    `MP: ${character.mp}`,
-    `EXP: ${character.exp}`,
+    `HP: ${character.hp}/${character.hpMax}`,
+    `MP: ${character.mp}/${character.mpMax}`,
+    `EXP: ${character.exp}/${character.expToLevel}`,
     `돈: ${character.gold} 전`,
     `위치: ${roomName}`,
     `팀: ${team.length ? team.join(', ') : '없음'}`,
+    '',
+    '[현재 임무]',
+    currentQuest().title,
+    currentQuest().goal,
     '',
     '[장비]',
     ...Object.entries(character.equipment).map(([slot, item]) => `${slot}: ${item}`),
@@ -223,6 +308,31 @@ function renderStatusPanel() {
     '[보관 아이템]',
     ...character.inventory.map((item, index) => `${index + 1}. ${item}`)
   ].join('\n');
+}
+
+function hasItem(name) {
+  return character.inventory.some((item) => item.startsWith(name));
+}
+
+function addItem(item) {
+  character.inventory.push(item);
+}
+
+function removeOneItem(name) {
+  const index = character.inventory.findIndex((item) => item.startsWith(name));
+  if (index >= 0) character.inventory.splice(index, 1);
+  return index >= 0;
+}
+
+function setStoryStep(step, text) {
+  if (character.storyStep >= step) return;
+  character.storyStep = Math.min(step, story.length - 1);
+  append(`\n[임무 갱신]\n${currentQuest().title}\n${text || currentQuest().goal}`, 'choice');
+}
+
+function commitProgress() {
+  renderStatusPanel();
+  saveGameState();
 }
 
 function currentSettings() {
@@ -284,7 +394,129 @@ function findUser(query) {
 
 function look() {
   const room = rooms[roomName];
-  append(`\n[${roomName}]\n${room.desc}\n출구: ${room.exits.join(', ')}\n주변 유저: ${roomUsers().join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
+  append(`\n[${roomName}]\n${room.desc}\n출구: ${room.exits.join(', ')}\n고정 NPC: ${(roomNpcs[roomName] || []).join(', ') || '없음'}\n주변 유저: ${roomUsers().join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
+  showChoices();
+}
+
+function showQuest() {
+  append(`\n[임무]\n${currentQuest().title}\n${currentQuest().goal}\n힌트: ${currentQuest().hint}`, 'choice');
+}
+
+function welcome() {
+  append('\n[환영]\n무한대전은 광장에서 시작해 봐/조사로 주변을 읽고, 대화로 임무를 받고, 공격으로 경험과 돈을 얻고, 수련으로 레벨을 올리는 PC통신식 MUD입니다.\n초보자는 현감청에서 첫 임무를 받고 생명의나무 주변에서 감을 잡으세요.', 'room');
+  if (character.storyStep === 0) setStoryStep(1, '현감청으로 가서 현감과 대화하자.');
+  commitProgress();
+  showChoices();
+}
+
+function inspectRoom() {
+  const npcs = roomNpcs[roomName] || [];
+  const encounters = roomEncounters[roomName] || [];
+  append(`\n[조사]\n${rooms[roomName].desc}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n임무 힌트: ${currentQuest().hint}`, 'room');
+  if (roomName === '북문' && character.storyStep === 5) {
+    addItem('북문 경비의 표식');
+    setStoryStep(6, '북문 조사를 마쳤다. 이제 사냥, 수련, 대화로 다음 장을 준비하자.');
+    commitProgress();
+  }
+  showChoices();
+}
+
+function talkNpc(input = '') {
+  const target = input.trim();
+  const npcs = roomNpcs[roomName] || [];
+  const npc = npcs.find((name) => !target || name.includes(target) || target.includes(name));
+  if (!npc) {
+    append(`대화할 상대가 없습니다. 이곳 NPC: ${npcs.join(', ') || '없음'}`);
+    return;
+  }
+
+  if (npc === '현감') {
+    append('현감: 광장 북쪽 발자국이 심상치 않다. 초보사냥터에서 증거를 가져오면 수련 허가를 내리겠다.', 'ally');
+    if (!hasItem('현감의 추천서')) addItem('현감의 추천서');
+    if (character.storyStep <= 1) setStoryStep(2, '초보사냥터에서 작은 괴물을 사냥해 증거를 찾자.');
+  } else if (npc === '안내자') {
+    append('안내자: 생명의나무 아래에서 길을 익힌 자만 북문 너머를 오래 버틴다. 표식을 찾으면 다음 길이 열린다.', 'ally');
+    if (!hasItem('생명의나무 잎')) addItem('생명의나무 잎');
+    if (character.storyStep === 4) setStoryStep(5, '북문으로 가서 성문 주변을 조사하자.');
+  } else if (npc === '수련 교관') {
+    append(`수련 교관: 다음 수련에는 경험 ${character.expToLevel}, 돈 ${character.expToLevel} 전이 필요하다.`, 'ally');
+  } else if (npc === '약장수') {
+    append('약장수: 지금은 회복약만 취급한다. "사용 회복약"이면 바로 마실 수 있다.', 'ally');
+  } else {
+    append(`${npc}: ${pickFresh(roomChatter[roomName] || chatter)}`, 'ally');
+  }
+  commitProgress();
+  showChoices();
+}
+
+function showInventory() {
+  append(`\n[소지품]\n${character.inventory.map((item, index) => `${index + 1}. ${item}`).join('\n') || '비어 있음'}`);
+}
+
+function showScore() {
+  renderStatusPanel();
+  append(`\n[점수]\n${character.title} ${character.name} / 레벨 ${character.level}\nHP ${character.hp}/${character.hpMax}  MP ${character.mp}/${character.mpMax}\nEXP ${character.exp}/${character.expToLevel}  돈 ${character.gold} 전\n현재 임무: ${currentQuest().title}`);
+}
+
+function useItem(input = '') {
+  if (!/회복약|약/.test(input)) {
+    append('사용할 물건을 입력하세요. 예) 사용 회복약');
+    return;
+  }
+  if (!removeOneItem('회복약')) {
+    append('회복약이 없습니다.');
+    return;
+  }
+  character.hp = character.hpMax;
+  append('회복약을 마셨습니다. HP가 모두 회복되었습니다.', 'ally');
+  commitProgress();
+}
+
+function hunt(input = '') {
+  const encounters = roomEncounters[roomName] || [];
+  if (!encounters.length) {
+    append('이곳은 사냥터가 아닙니다. 초보사냥터나 북문 근처에서 시도하세요.');
+    return;
+  }
+
+  const monster = encounters.find((item) => input && item.name.includes(input.trim())) || pick(encounters);
+  const teamBonus = team.length * 4;
+  const damage = Math.max(1, Math.floor(monster.hp / 2) - teamBonus);
+  character.hp = Math.max(1, character.hp - damage);
+  character.exp += monster.exp;
+  character.gold += monster.gold;
+  append(`\n[전투]\n${monster.name}을(를) 공격했다.\n피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${monster.exp}, 돈 ${monster.gold} 전`, 'choice');
+  if (monster.item && !hasItem(monster.item)) {
+    addItem(monster.item);
+    append(`획득 물품: ${monster.item}`, 'ally');
+  }
+  if (character.storyStep === 2) setStoryStep(3, '증거를 얻었다. 수련장으로 가서 레벨을 올리자.');
+  commitProgress();
+  showChoices();
+}
+
+function trainCharacter() {
+  if (roomName !== '수련장') {
+    append('수련은 수련장에서만 할 수 있습니다.');
+    return;
+  }
+  if (character.exp < character.expToLevel || character.gold < character.expToLevel) {
+    append(`수련 조건 부족. 필요: 경험 ${character.expToLevel}, 돈 ${character.expToLevel} 전 / 현재: 경험 ${character.exp}, 돈 ${character.gold} 전`);
+    return;
+  }
+
+  character.exp -= character.expToLevel;
+  character.gold -= character.expToLevel;
+  character.level += 1;
+  character.title = character.level >= 3 ? '수련생' : '초보';
+  character.hpMax += 8;
+  character.mpMax += 3;
+  character.hp = character.hpMax;
+  character.mp = character.mpMax;
+  character.expToLevel = expForLevel(character.level);
+  append(`\n[수련]\n수련을 마쳤습니다. 레벨 ${character.level}이 되었습니다.`, 'choice');
+  if (character.storyStep === 3 && character.level >= 2) setStoryStep(4, '생명의나무로 가서 안내자와 대화하자.');
+  commitProgress();
   showChoices();
 }
 
@@ -292,7 +524,8 @@ function fallbackNeko(question = '') {
   const q = question.trim();
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 말해봐. 최대 4명까지 함께 움직일 수 있어.';
-  if (/명령|도움|뭐.*해|방법/.test(q)) return '도움, 보기, 유저, 이동 장소, 말 내용, 귓 이름 내용, 팀 이름, 팀해산, 네코 질문을 쓸 수 있어.';
+  if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
+  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 조사, 대화 대상, 사냥, 수련, 점수, 소지품, 사용 회복약, 이동 장소를 쓸 수 있어.';
   if (/사람|유저|누구/.test(q)) return `가상 유저 100명이 접속 중이야. 이 방에는 ${roomUsers().slice(0, 6).join(', ')} 등이 있어.`;
   if (/사냥|전투|초보/.test(q)) return '처음이면 수련장으로 가고, 팀을 만든 뒤 북문을 지나 초보사냥터로 가면 안전해.';
   return 'Gemini 서버 연결이 안 되면 기본 네코로 안내할게. 지금은 주변을 살피고 팀을 모으자.';
@@ -311,21 +544,55 @@ function buildSystemInstruction() {
     `출구: ${rooms[roomName].exits.join(', ')}`,
     `주변 유저: ${roomUsers().join(', ')}`,
     `현재 팀: ${team.length ? team.join(', ') : '없음'}`,
+    `캐릭터: 레벨 ${character.level}, HP ${character.hp}/${character.hpMax}, EXP ${character.exp}/${character.expToLevel}, 돈 ${character.gold}`,
+    `현재 임무: ${currentQuest().title} - ${currentQuest().goal}`,
+    `소지품: ${character.inventory.join(', ')}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 보기, 유저, 이동 장소, 말 내용, 귓 이름 내용, 팀 이름.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 조사, 대화 대상, 사냥, 수련, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름.'
   ].join('\n');
+}
+
+function moveCommandToward(destination) {
+  if (rooms[roomName].exits.includes(destination)) return `이동 ${destination}`;
+  if (roomName !== '중앙광장' && rooms[roomName].exits.includes('중앙광장')) return '이동 중앙광장';
+  if (destination === '초보사냥터') return '이동 북문';
+  return `이동 ${destination}`;
+}
+
+function storyChoice() {
+  if (character.storyStep === 0) return { label: '환영 안내 읽기', command: '환영' };
+  if (character.storyStep === 1) return roomName === '현감청'
+    ? { label: '현감과 대화', command: '대화 현감' }
+    : { label: '현감청으로 이동', command: moveCommandToward('현감청') };
+  if (character.storyStep === 2) return roomName === '초보사냥터'
+    ? { label: '작은 괴물 사냥', command: '사냥' }
+    : { label: '초보사냥터로 이동', command: moveCommandToward('초보사냥터') };
+  if (character.storyStep === 3) return roomName === '수련장'
+    ? { label: '수련하기', command: '수련' }
+    : { label: '수련장으로 이동', command: moveCommandToward('수련장') };
+  if (character.storyStep === 4) return roomName === '생명의나무'
+    ? { label: '안내자와 대화', command: '대화 안내자' }
+    : { label: '생명의나무로 이동', command: moveCommandToward('생명의나무') };
+  if (character.storyStep === 5) return roomName === '북문'
+    ? { label: '북문 조사', command: '조사' }
+    : { label: '북문으로 이동', command: moveCommandToward('북문') };
+  return { label: '현재 임무 확인', command: '임무' };
 }
 
 function makeChoices() {
   const room = rooms[roomName];
   const candidate = roomUsers().find((name) => !team.includes(name)) || roomUsers()[0];
+  const combat = (roomEncounters[roomName] || []).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null;
   const raw = [
+    storyChoice(),
+    combat,
+    roomName === '수련장' ? { label: '수련하기', command: '수련' } : null,
     { label: `${room.exits[0] || roomName}(으)로 이동`, command: `이동 ${room.exits[0] || roomName}` },
     { label: `${candidate}에게 말 걸기`, command: `귓 ${candidate} 여기서 무엇을 조심해야 해?` },
     { label: `${candidate} 팀 영입`, command: `팀 ${candidate}` },
     { label: '네코에게 다음 수 묻기', command: '네코 지금 무엇을 하면 좋을까?' }
-  ];
+  ].filter(Boolean);
   return raw.filter((choice, index, list) => list.findIndex((item) => item.command === choice.command) === index).slice(0, 4);
 }
 
@@ -429,8 +696,7 @@ function move(destination) {
   }
 
   roomName = target;
-  renderStatusPanel();
-  saveGameState();
+  commitProgress();
   append(`${roomName}(으)로 이동했다.`);
   if (team.length) append(`${team.join(', ')}: 같이 이동했어.`);
   look();
@@ -451,25 +717,23 @@ function teamUp(query) {
     return;
   }
   team.push(name);
-  renderStatusPanel();
-  saveGameState();
+  commitProgress();
   append(`${name}: 좋아, 같이 가자.`, 'ally');
   append(`현재 팀: ${team.join(', ')}`);
 }
 
 function clearTeam() {
   team = [];
-  renderStatusPanel();
-  saveGameState();
+  commitProgress();
   append('팀을 해산했습니다.');
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n도움              이 안내\n보기              현재 장소 보기\n상태              캐릭터 상태 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀                현재 팀 보기\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n설정              설정창 보기\n랜덤              네코 설정 랜덤 생성\n설계도            게임 설계 요약\n\n예) 네코 어디로 가야 해?\n예) 1\n예) 팀 검객루안`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n환영              초보 안내\n임무              현재 스토리 목표\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험과 돈으로 레벨업\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 환영\n예) 대화 현감\n예) 사냥\n예) 수련`);
 }
 
 function blueprint() {
-  append(`\n[설계도]\n원형: PC통신식 텍스트 MUD, 방 이동, 주변 유저, 귓속말, 팀업.\n새 핵심: 네코가 현재 방/팀/유저를 읽고 다음 행동을 추천한다.\n진행 방식: 플레이어는 직접 명령하거나 1~4 추천 행동을 고른다.\n개성: 실제 유저처럼 보이는 AI 100명이 방마다 소문, 반응, 팀 대사를 만든다.\n확장: 의뢰, 전투, 아이템은 이 선택지 구조에 명령만 추가하면 된다.`, 'room');
+  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\n새 핵심: 네코가 현재 임무와 상태를 읽고 1~4 행동을 추천한다.\n진행 방식: 환영 → 현감 → 초보사냥 → 수련 → 생명의나무 → 북문 조사.\n확장: 몬스터/지역/대화 조건만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
 }
 
 function ambientChat() {
@@ -484,12 +748,11 @@ function connect() {
   if (connected) return;
 
   setConnected(true);
-  renderStatusPanel();
-  saveGameState();
+  commitProgress();
   setStatus('입장 완료', 'online');
   setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\nAI 유저 100명 / 팀업 가능`);
   clearScreen();
-  append('무한대전에 입장했습니다.');
+  append(`무한대전에 입장했습니다. 이어하기: ${roomName} / ${currentQuest().title}`);
   append('검은 고양이 네코가 조용히 옆에 앉습니다.');
   append('네코: Vercel 서버 키로 대화할게. 설정에서는 내 성격과 모델만 바꾸면 돼.');
   look();
@@ -524,11 +787,21 @@ async function runCommand(raw) {
   const body = rest.join(' ');
 
   if (['도움', 'help', '?', '명령'].includes(command)) help();
+  else if (command === '환영') welcome();
+  else if (['임무', '퀘스트', 'quest'].includes(command)) showQuest();
   else if (['보기', 'look', 'l'].includes(command)) look();
+  else if (['조사', '검색', 'search'].includes(command)) inspectRoom();
+  else if (['대화', 'talk'].includes(command)) talkNpc(body);
+  else if (['사냥', '공격', '때려', '쳐', 'attack'].includes(command)) hunt(body);
+  else if (command === '수련') trainCharacter();
+  else if (['소지품', '소지', 'inventory'].includes(command)) showInventory();
+  else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();
+  else if (['사용', '마셔', '먹어'].includes(command)) useItem(body);
+  else if (['귀환', '광장'].includes(command)) move('중앙광장');
   else if (['상태', '스탯', '장비', '아이템', 'status', 'stat'].includes(command)) renderStatusPanel();
   else if (['저장', 'save'].includes(command)) {
     saveGameState();
-    append('현재 위치와 팀 상태를 저장했습니다.');
+    append('현재 위치, 팀, 캐릭터 진행을 저장했습니다.');
   }
   else if (['유저', '누구', 'users'].includes(command)) listUsers();
   else if (['말', '채팅', 'say'].includes(command)) say(body);
@@ -541,6 +814,7 @@ async function runCommand(raw) {
   else if (command === '설정') document.querySelector('.settings').open = true;
   else if (command === '랜덤') makeRandomSettings();
   else if (command === '설계도') blueprint();
+  else if (rooms[command]) move(command);
   else if (names.includes(command)) whisper(input);
   else say(input);
 
