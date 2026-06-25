@@ -277,7 +277,10 @@ async function requestNeko(input, previousInteractionId = null) {
     })
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || data.error || `Gemini HTTP ${res.status}`);
+  if (!res.ok) {
+    const source = data.keySource ? ` / key: ${data.keySource}` : '';
+    throw new Error(`${data.message || data.error || `Gemini HTTP ${res.status}`}${source}`);
+  }
   return data;
 }
 

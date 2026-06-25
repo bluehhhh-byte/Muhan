@@ -16,11 +16,17 @@ module.exports = async function handler(req, res) {
   }
 
   const { apiKey, model, input, systemInstruction } = body;
-  const requestApiKey = String(apiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '').trim();
+  const keyOptions = [
+    ['settings', apiKey],
+    ['GEMINI_API_KEY', process.env.GEMINI_API_KEY],
+    ['GOOGLE_API_KEY', process.env.GOOGLE_API_KEY]
+  ].map(([source, value]) => [source, String(value || '').trim()]);
+  const [keySource, requestApiKey] = keyOptions.find(([, value]) => value) || ['none', ''];
   if (!requestApiKey || !input) {
     res.status(400).json({
       error: 'missing_api_key_or_input',
       message: 'Gemini API key is missing. Enter it in settings or set GEMINI_API_KEY or GOOGLE_API_KEY in Vercel.',
+      keySource,
       env: {
         GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
         GOOGLE_API_KEY: Boolean(process.env.GOOGLE_API_KEY)
@@ -70,7 +76,8 @@ module.exports = async function handler(req, res) {
       res.status(upstream.status).json({
         error: 'gemini_error',
         message: data.error && data.error.message ? data.error.message : raw || 'Gemini request failed',
-        status: data.error && data.error.status ? data.error.status : null
+        status: data.error && data.error.status ? data.error.status : null,
+        keySource
       });
       return;
     }
@@ -78,12 +85,14 @@ module.exports = async function handler(req, res) {
     res.setHeader('cache-control', 'no-store');
     res.status(200).json({
       id: null,
-      text: ((data.candidates || [])[0]?.content?.parts || []).map((part) => part.text || '').join('')
+      text: ((data.candidates || [])[0]?.content?.parts || []).map((part) => part.text || '').join(''),
+      keySource
     });
   } catch (error) {
     res.status(502).json({
       error: 'gemini_unreachable',
-      message: error && error.message ? error.message : 'Gemini request failed'
+      message: error && error.message ? error.message : 'Gemini request failed',
+      keySource
     });
   }
 };
