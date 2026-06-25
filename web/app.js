@@ -3,7 +3,8 @@
 const MAX_LINES = 700;
 const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.1';
+const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.2';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -173,7 +174,7 @@ function saveSettings() {
 function loadSettings() {
   const defaults = {
     apiKey: '',
-    model: 'gemini-3.5-flash',
+    model: DEFAULT_MODEL,
     gender: '검은 고양이',
     tone: '상냥하고 짧게 말함',
     level: '7',
@@ -181,7 +182,9 @@ function loadSettings() {
     prompt: randomSettings.prompt[0]
   };
   const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  for (const [key, value] of Object.entries({ ...defaults, ...saved })) fields[key].value = value;
+  const values = { ...defaults, ...saved };
+  if (values.model === 'gemini-3.5-flash') values.model = DEFAULT_MODEL;
+  for (const [key, value] of Object.entries(values)) fields[key].value = value;
 }
 
 function makeRandomSettings() {
@@ -272,7 +275,7 @@ async function requestNeko(input, previousInteractionId = null) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       apiKey: settings.apiKey,
-      model: settings.model || 'gemini-3.5-flash',
+      model: settings.model || DEFAULT_MODEL,
       input,
       systemInstruction: buildSystemInstruction(),
       previousInteractionId

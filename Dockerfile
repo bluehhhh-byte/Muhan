@@ -42,7 +42,7 @@ RUN set -eux; \
 FROM --platform=linux/amd64 node:22-trixie-slim AS runtime
 ARG INSTALL_AGY=0
 ENV NODE_ENV=production \
-    APP_VERSION=0.9.1 \
+    APP_VERSION=0.9.2 \
     PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     MUHAN_HOME=/opt/muhan \
     MUHAN_HOST=127.0.0.1 \

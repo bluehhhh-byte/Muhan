@@ -22,7 +22,7 @@ module.exports = async function handler(req, res) {
   }
 
   const payload = {
-    model: model || 'gemini-3.5-flash',
+    model: model || 'gemini-3.1-flash-lite',
     input,
     system_instruction: systemInstruction || 'You are Neko, a guide cat in MUHAN Daejeon.',
     generation_config: {
