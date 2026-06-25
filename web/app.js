@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.1';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -19,6 +19,7 @@ const sendBtn = document.getElementById('gameSend');
 const clearBtn = document.getElementById('gameClear');
 const nekoBtn = document.getElementById('gameEnter');
 const checkStatusBtn = document.getElementById('checkStatus');
+const autoBtn = document.getElementById('gameAuto');
 const autoScrollEl = document.getElementById('autoScroll');
 const geminiStatusEl = document.getElementById('geminiTestStatus');
 
@@ -175,6 +176,9 @@ let historyIndex = 0;
 let roomName = '중앙광장';
 let team = [];
 let tickTimer = null;
+let autoTimer = null;
+let autoProgress = false;
+let autoBusy = false;
 let lastSpeaker = names[0];
 let nekoInteractionId = null;
 let choiceSlots = [];
@@ -228,6 +232,18 @@ function expForLevel(level) {
 
 function currentQuest() {
   return story[Math.min(character.storyStep, story.length - 1)];
+}
+
+function nekoProfile() {
+  const settings = currentSettings();
+  const level = Math.max(1, Math.min(99, Number(settings.level) || 1));
+  const ability = settings.ability || '길찾기와 명령어 해석';
+  const combat = 2 + Math.floor(level / 8) + (/전투|전술|공격/.test(ability) ? 4 : 0);
+  const guard = Math.floor(level / 15) + (/위험|예지|생존/.test(ability) ? 3 : 0);
+  const growthRate = 1 + Math.min(0.7, level / 100) + (/전투|수련|성장/.test(ability) ? 0.15 : 0);
+  const goldRate = 1 + Math.min(0.35, level / 180) + (/소문|탐지|상인/.test(ability) ? 0.15 : 0);
+  const autoDelay = /길찾기|명령어|예지/.test(ability) ? 3200 : 4200;
+  return { level, ability, combat, guard, growthRate, goldRate, autoDelay };
 }
 
 function saveGameState() {
@@ -285,6 +301,7 @@ function loadGameState() {
 }
 
 function renderStatusPanel() {
+  const neko = nekoProfile();
   statusPanelEl.textContent = [
     '[캐릭터]',
     `이름: ${character.name}`,
@@ -301,6 +318,13 @@ function renderStatusPanel() {
     '[현재 임무]',
     currentQuest().title,
     currentQuest().goal,
+    '',
+    '[네코]',
+    `레벨: ${neko.level}`,
+    `능력: ${neko.ability}`,
+    `전투 보조: +${neko.combat}`,
+    `성장 보정: x${neko.growthRate.toFixed(2)}`,
+    `자동 진행: ${autoProgress ? '켜짐' : '꺼짐'}`,
     '',
     '[장비]',
     ...Object.entries(character.equipment).map(([slot, item]) => `${slot}: ${item}`),
@@ -344,6 +368,8 @@ function saveSettings() {
   nekoInteractionId = null;
   setGeminiStatus('저장됨');
   append('설정이 저장되었습니다. 네코의 대화 기억을 새로 시작합니다.');
+  if (autoProgress) setAutoProgress(true);
+  else renderStatusPanel();
 }
 
 function loadSettings() {
@@ -380,7 +406,9 @@ function setConnected(value) {
   commandEl.disabled = !value;
   sendBtn.disabled = !value;
   nekoBtn.disabled = !value;
+  autoBtn.disabled = !value;
   if (value) commandEl.focus();
+  setAutoButton();
 }
 
 function roomUsers() {
@@ -480,12 +508,15 @@ function hunt(input = '') {
   }
 
   const monster = encounters.find((item) => input && item.name.includes(input.trim())) || pick(encounters);
-  const teamBonus = team.length * 4;
-  const damage = Math.max(1, Math.floor(monster.hp / 2) - teamBonus);
+  const neko = nekoProfile();
+  const teamBonus = team.length * 4 + neko.combat;
+  const damage = Math.max(1, Math.floor(monster.hp / 2) - teamBonus - neko.guard);
+  const expGain = Math.round(monster.exp * neko.growthRate);
+  const goldGain = Math.round(monster.gold * neko.goldRate);
   character.hp = Math.max(1, character.hp - damage);
-  character.exp += monster.exp;
-  character.gold += monster.gold;
-  append(`\n[전투]\n${monster.name}을(를) 공격했다.\n피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${monster.exp}, 돈 ${monster.gold} 전`, 'choice');
+  character.exp += expGain;
+  character.gold += goldGain;
+  append(`\n[전투]\n${monster.name}을(를) 공격했다.\n네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.\n피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
   if (monster.item && !hasItem(monster.item)) {
     addItem(monster.item);
     append(`획득 물품: ${monster.item}`, 'ally');
@@ -596,9 +627,58 @@ function makeChoices() {
   return raw.filter((choice, index, list) => list.findIndex((item) => item.command === choice.command) === index).slice(0, 4);
 }
 
+function bestAutoChoice() {
+  const choices = makeChoices().filter((choice) => !choice.command.startsWith('네코'));
+  if (roomName === '수련장' && character.exp >= character.expToLevel && character.gold >= character.expToLevel) {
+    return choices.find((choice) => choice.command === '수련') || { label: '수련하기', command: '수련' };
+  }
+  if (character.storyStep === 3 && (character.exp < character.expToLevel || character.gold < character.expToLevel)) {
+    return roomName === '초보사냥터'
+      ? { label: '수련 자원 모으기', command: '사냥' }
+      : { label: '수련 자원 모으러 이동', command: moveCommandToward('초보사냥터') };
+  }
+  return choices.find((choice) => choice.command === '사냥')
+    || choices.find((choice) => choice.command !== '임무')
+    || choices[0];
+}
+
 function showChoices() {
   choiceSlots = makeChoices();
   append(`\n[다음 행동]\n${choiceSlots.map((choice, index) => `${index + 1}. ${choice.label}`).join('\n')}`, 'choice');
+}
+
+function setAutoButton() {
+  autoBtn.textContent = autoProgress ? '6. 자동 진행 끄기' : '6. 자동 진행 켜기';
+  autoBtn.disabled = !connected;
+  renderStatusPanel();
+}
+
+async function autoTick() {
+  if (!connected || !autoProgress || autoBusy) return;
+  const choice = bestAutoChoice();
+  if (!choice) return;
+  autoBusy = true;
+  append(`\n[자동 진행]\n네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
+  try {
+    await runCommand(choice.command);
+  } finally {
+    autoBusy = false;
+  }
+}
+
+function setAutoProgress(value) {
+  autoProgress = Boolean(value);
+  if (autoTimer) {
+    window.clearInterval(autoTimer);
+    autoTimer = null;
+  }
+  if (autoProgress && connected) {
+    autoTimer = window.setInterval(autoTick, nekoProfile().autoDelay);
+    appendNeko('자동 진행을 시작할게. 위험하면 언제든 다시 눌러서 멈춰.');
+  } else if (connected) {
+    appendNeko('자동 진행을 멈췄어.');
+  }
+  setAutoButton();
 }
 
 async function askNeko(question = '') {
@@ -729,7 +809,7 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n환영              초보 안내\n임무              현재 스토리 목표\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험과 돈으로 레벨업\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 환영\n예) 대화 현감\n예) 사냥\n예) 수련`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n환영              초보 안내\n임무              현재 스토리 목표\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험과 돈으로 레벨업\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 환영\n예) 자동\n예) 대화 현감\n예) 사냥\n예) 수련`);
 }
 
 function blueprint() {
@@ -750,7 +830,7 @@ function connect() {
   setConnected(true);
   commitProgress();
   setStatus('입장 완료', 'online');
-  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\nAI 유저 100명 / 팀업 가능`);
+  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'}\nAI 유저 100명 / 팀업 가능`);
   clearScreen();
   append(`무한대전에 입장했습니다. 이어하기: ${roomName} / ${currentQuest().title}`);
   append('검은 고양이 네코가 조용히 옆에 앉습니다.');
@@ -761,6 +841,11 @@ function connect() {
 
 function disconnect() {
   if (!connected) return;
+  if (autoProgress) setAutoProgress(false);
+  if (autoTimer) {
+    window.clearInterval(autoTimer);
+    autoTimer = null;
+  }
   window.clearInterval(tickTimer);
   tickTimer = null;
   setConnected(false);
@@ -797,6 +882,7 @@ async function runCommand(raw) {
   else if (['소지품', '소지', 'inventory'].includes(command)) showInventory();
   else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();
   else if (['사용', '마셔', '먹어'].includes(command)) useItem(body);
+  else if (['자동', 'auto'].includes(command)) setAutoProgress(!autoProgress);
   else if (['귀환', '광장'].includes(command)) move('중앙광장');
   else if (['상태', '스탯', '장비', '아이템', 'status', 'stat'].includes(command)) renderStatusPanel();
   else if (['저장', 'save'].includes(command)) {
@@ -825,7 +911,8 @@ connectBtn.addEventListener('click', connect);
 disconnectBtn.addEventListener('click', disconnect);
 clearBtn.addEventListener('click', clearScreen);
 nekoBtn.addEventListener('click', () => askNeko('도움'));
-checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
+autoBtn.addEventListener('click', () => setAutoProgress(!autoProgress));
+checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'}\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
 document.getElementById('saveSettings').addEventListener('click', saveSettings);
 document.getElementById('randomSettings').addEventListener('click', makeRandomSettings);
 document.getElementById('testGemini').addEventListener('click', testGemini);
@@ -859,6 +946,7 @@ commandEl.addEventListener('keydown', (event) => {
 
 window.addEventListener('beforeunload', () => {
   saveGameState();
+  if (autoTimer) window.clearInterval(autoTimer);
   window.clearInterval(tickTimer);
 });
 
@@ -867,7 +955,7 @@ loadGameState();
 setConnected(false);
 renderStatusPanel();
 setStatus('입장 대기', '');
-setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\nAI 유저 100명 / 팀업 가능`);
+setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 꺼짐\nAI 유저 100명 / 팀업 가능`);
 append('무한대전 PC통신 접속 대기');
-append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 상태 확인');
+append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 상태 확인  6. 자동 진행');
 append('Gemini 키는 Vercel 환경변수 GEMINI_API_KEY를 사용합니다.');
