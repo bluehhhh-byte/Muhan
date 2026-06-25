@@ -189,6 +189,24 @@ input:disabled {
   padding: 1px 4px;
 }
 
+.line.neko {
+  color: #ffff66;
+}
+
+.line.room {
+  color: #66ffff;
+}
+
+.line.choice {
+  color: #ffffff;
+  background: #00004a;
+  padding: 1px 4px;
+}
+
+.line.ally {
+  color: #99ff99;
+}
+
 .commandbar {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

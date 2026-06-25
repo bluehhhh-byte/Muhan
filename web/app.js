@@ -4,7 +4,7 @@ const MAX_LINES = 700;
 const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.3';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.4';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -120,6 +120,7 @@ let team = [];
 let tickTimer = null;
 let lastSpeaker = names[0];
 let nekoInteractionId = null;
+let choiceSlots = [];
 const recentPhrases = [];
 
 function pick(list) {
@@ -158,6 +159,10 @@ function append(text, className = '') {
 
 function clearScreen() {
   screenEl.textContent = '';
+}
+
+function appendNeko(text) {
+  append(`네코: ${text}`, 'neko');
 }
 
 function currentSettings() {
@@ -217,7 +222,8 @@ function findUser(query) {
 
 function look() {
   const room = rooms[roomName];
-  append(`\n[${roomName}]\n${room.desc}\n출구: ${room.exits.join(', ')}\n주변 유저: ${roomUsers().join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`);
+  append(`\n[${roomName}]\n${room.desc}\n출구: ${room.exits.join(', ')}\n주변 유저: ${roomUsers().join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
+  showChoices();
 }
 
 function fallbackNeko(question = '') {
@@ -244,23 +250,42 @@ function buildSystemInstruction() {
     `주변 유저: ${roomUsers().join(', ')}`,
     `현재 팀: ${team.length ? team.join(', ') : '없음'}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
-    '필요하면 사용 가능한 명령어를 자연스럽게 추천한다: 보기, 유저, 이동 장소, 말 내용, 귓 이름 내용, 팀 이름.'
+    '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
+    '사용 가능한 명령어를 자연스럽게 추천한다: 보기, 유저, 이동 장소, 말 내용, 귓 이름 내용, 팀 이름.'
   ].join('\n');
+}
+
+function makeChoices() {
+  const room = rooms[roomName];
+  const candidate = roomUsers().find((name) => !team.includes(name)) || roomUsers()[0];
+  const raw = [
+    { label: `${room.exits[0] || roomName}(으)로 이동`, command: `이동 ${room.exits[0] || roomName}` },
+    { label: `${candidate}에게 말 걸기`, command: `귓 ${candidate} 여기서 무엇을 조심해야 해?` },
+    { label: `${candidate} 팀 영입`, command: `팀 ${candidate}` },
+    { label: '네코에게 다음 수 묻기', command: '네코 지금 무엇을 하면 좋을까?' }
+  ];
+  return raw.filter((choice, index, list) => list.findIndex((item) => item.command === choice.command) === index).slice(0, 4);
+}
+
+function showChoices() {
+  choiceSlots = makeChoices();
+  append(`\n[다음 행동]\n${choiceSlots.map((choice, index) => `${index + 1}. ${choice.label}`).join('\n')}`, 'choice');
 }
 
 async function askNeko(question = '') {
   const settings = currentSettings();
   const input = question.trim() || '지금 무엇을 하면 좋을까?';
 
-  append('네코: 생각 중...');
+  appendNeko('생각 중...');
   try {
     const data = await requestNeko(input, nekoInteractionId);
     if (data.id) nekoInteractionId = data.id;
-    append(`네코: ${data.text || fallbackNeko(input)}`);
+    appendNeko(data.text || fallbackNeko(input));
   } catch (error) {
-    append(`네코: Gemini 연결 실패. ${error.message}`);
-    append(`네코: ${fallbackNeko(input)}`);
+    appendNeko(`Gemini 연결 실패. ${error.message}`);
+    appendNeko(fallbackNeko(input));
   }
+  showChoices();
 }
 
 async function requestNeko(input, previousInteractionId = null) {
@@ -374,7 +399,11 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n도움              이 안내\n보기              현재 장소 보기\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀                현재 팀 보기\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n설정              설정창 보기\n랜덤              네코 설정 랜덤 생성\n\n예) 네코 어디로 가야 해?\n예) 팀 검객루안\n예) 말 안녕하세요`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n도움              이 안내\n보기              현재 장소 보기\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀                현재 팀 보기\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n설정              설정창 보기\n랜덤              네코 설정 랜덤 생성\n설계도            게임 설계 요약\n\n예) 네코 어디로 가야 해?\n예) 1\n예) 팀 검객루안`);
+}
+
+function blueprint() {
+  append(`\n[설계도]\n원형: PC통신식 텍스트 MUD, 방 이동, 주변 유저, 귓속말, 팀업.\n새 핵심: 네코가 현재 방/팀/유저를 읽고 다음 행동을 추천한다.\n진행 방식: 플레이어는 직접 명령하거나 1~4 추천 행동을 고른다.\n개성: 실제 유저처럼 보이는 AI 100명이 방마다 소문, 반응, 팀 대사를 만든다.\n확장: 의뢰, 전투, 아이템은 이 선택지 구조에 명령만 추가하면 된다.`, 'room');
 }
 
 function ambientChat() {
@@ -415,6 +444,13 @@ async function runCommand(raw) {
     return;
   }
 
+  if (/^[1-4]$/.test(input) && choiceSlots[Number(input) - 1]) {
+    const choice = choiceSlots[Number(input) - 1];
+    append(`=> ${choice.command}`, 'choice');
+    await runCommand(choice.command);
+    return;
+  }
+
   const [command, ...rest] = input.split(/\s+/);
   const body = rest.join(' ');
 
@@ -430,6 +466,7 @@ async function runCommand(raw) {
   else if (command === '네코') await askNeko(body);
   else if (command === '설정') document.querySelector('.settings').open = true;
   else if (command === '랜덤') makeRandomSettings();
+  else if (command === '설계도') blueprint();
   else if (names.includes(command)) whisper(input);
   else say(input);
 
