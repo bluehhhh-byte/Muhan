@@ -3,7 +3,7 @@
 const MAX_LINES = 700;
 const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.1';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -17,6 +17,7 @@ const clearBtn = document.getElementById('gameClear');
 const nekoBtn = document.getElementById('gameEnter');
 const checkStatusBtn = document.getElementById('checkStatus');
 const autoScrollEl = document.getElementById('autoScroll');
+const geminiStatusEl = document.getElementById('geminiTestStatus');
 
 const fields = {
   apiKey: document.getElementById('geminiApiKey'),
@@ -53,7 +54,48 @@ const rooms = {
 const chatter = [
   '지금 중앙광장 사람 많다.', '초보는 수련장에서 감 잡고 나가면 편해.', '네코가 생각보다 똑똑하네.',
   '장터에 회복약 싸게 떴다.', '북문 밖은 아직 조심해야 해.', '누구 파티 할 사람?',
-  '오늘 접속자가 꽤 많네.', '명령어 모르면 네코에게 물어봐.'
+  '오늘 접속자가 꽤 많네.', '명령어 모르면 네코에게 물어봐.', '낡은 게시판에 새 의뢰가 붙었어.',
+  '방금 수련장에서 이상한 빛 봤다.', '주막 주인이 오늘은 말을 아끼네.', '초보사냥터에 발자국이 늘었어.',
+  '북문 경비가 아까부터 같은 방향만 보고 있어.', '장터 물가가 또 올랐네.', '무명검이 고수라는 소문 들었어?',
+  '접속음 들리면 아직도 설렌다.', '누가 방금 귓속말로 암호를 물어봤어.', '오늘은 파티 운이 좋은 날 같다.',
+  '중앙광장 전광판 글자가 한 번 깜빡였어.', '파천이 북문 밖에서 돌아왔다던데.', '소금장수가 정보값을 받기 시작했어.',
+  '수련장 허수아비 하나가 새것으로 바뀌었네.', '장터 뒤 골목은 아직 막혀 있어.', '주막에서는 조용한 사람이 제일 위험하지.',
+  '네코가 싫어하는 길은 보통 위험한 길이야.', '레벨보다 방향감각이 중요할 때도 있더라.', '누가 낡은 지도를 팔고 있어.',
+  '초보사냥터는 혼자보다 둘이 낫지.', '북문 밖 안개가 낮게 깔렸어.', '오늘따라 NPC들이 말을 길게 안 해.',
+  '무한대전은 오래 볼수록 이상한 데가 보여.', '나 방금 접속했는데 분위기 괜찮네.', '파티 모집은 짧게 말해야 잘 모여.',
+  '장터에서 회복약 사는 척하면 소문을 들을 수 있어.', '수련장 목검이 생각보다 아프다.', '주막 구석 자리는 항상 누가 맡아놔.',
+  '중앙광장에 있으면 모든 소문이 결국 지나가.', '북문은 준비 안 되면 그냥 구경만 해.', '네코한테 먼저 물어보는 게 빠르겠어.',
+  '낡은검이 아까 웃었는데 뭔가 알아낸 얼굴이었어.', '오늘은 말수가 적은 유저들이 더 많네.'
+];
+
+const roomChatter = {
+  '중앙광장': ['광장 전광판에 접속자 수가 또 늘었어.', '여기서 팀 구하면 오래 안 기다려도 돼.', '새로 온 사람은 먼저 보기부터 해봐.'],
+  '북문': ['문밖 바람 냄새가 달라졌어.', '북문은 한 걸음만 나가도 분위기가 바뀌지.', '경비가 오늘은 통행증을 안 묻네.'],
+  '주막': ['주막 소문은 반만 믿는 게 좋아.', '저쪽 탁자에서 장터 이야기가 계속 나와.', '여기서는 조용히 듣는 것도 기술이야.'],
+  '수련장': ['허수아비가 새 공격 패턴을 배운 것 같아.', '수련장은 지루해도 배신하지 않아.', '처음엔 목검부터 익숙해져야지.'],
+  '장터': ['장터 시세는 사람 마음처럼 흔들려.', '싸게 보이는 물건일수록 설명을 읽어야 해.', '상인이 오늘은 북문 물건을 많이 내놨어.'],
+  '초보사냥터': ['작은 몹도 둘러싸이면 귀찮아.', '처음 온 사람은 입구 근처에서 감을 봐.', '발자국을 보면 누가 먼저 지나갔는지 보여.']
+};
+
+const teamChatter = [
+  '내가 앞장설게.', '네코 말도 들어보자.', '다음 방까지 같이 가자.', '위험하면 바로 빠지자.',
+  '내가 주변 유저 반응을 볼게.', '사냥보다 정찰부터 하자.', '지금 팀 구성은 나쁘지 않아.', '말 걸 상대를 골라보자.'
+];
+
+const sayResponses = [
+  '좋아, 같이 보자.', '반가워.', '여기서 자주 보자.', '나도 방금 그 생각했어.', '주막 쪽 소문도 들어봐.',
+  '그 말은 기억해둘게.', '괜찮은 판단 같아.', '일단 주변을 더 보자.', '북문 쪽 이야기도 들어봤어?',
+  '장터에 단서가 있을지도 몰라.', '네코 의견도 궁금한데.', '천천히 가도 늦지 않아.'
+];
+
+const questionResponses = [
+  '그건 네코에게도 물어봐.', '나도 궁금했어. 같이 확인하자.', '질문이 좋네. 단서는 주막에 있을지도 몰라.',
+  '확실하진 않은데 북문 쪽에서 비슷한 말을 들었어.', '수련장에서 답을 아는 사람이 있을 거야.'
+];
+
+const reactionChatter = [
+  '네코 말대로 해봐.', '좋은 질문이야.', '나도 따라갈게.', '잠깐, 주변을 먼저 봐.', '그 선택 나쁘지 않아.',
+  '팀을 더 모으면 안전하겠어.', '지금은 서두르지 않는 게 좋아.', '방금 말에 누가 반응했어.'
 ];
 
 const randomSettings = {
@@ -77,9 +119,18 @@ let team = [];
 let tickTimer = null;
 let lastSpeaker = names[0];
 let nekoInteractionId = null;
+const recentPhrases = [];
 
 function pick(list) {
   return list[Math.floor(Math.random() * list.length)];
+}
+
+function pickFresh(list) {
+  const fresh = list.filter((item) => !recentPhrases.includes(item));
+  const value = pick(fresh.length ? fresh : list);
+  recentPhrases.push(value);
+  if (recentPhrases.length > 28) recentPhrases.shift();
+  return value;
 }
 
 function setStatus(text, className) {
@@ -89,6 +140,10 @@ function setStatus(text, className) {
 
 function setDiagnostics(text) {
   diagnosticsEl.textContent = text;
+}
+
+function setGeminiStatus(text) {
+  geminiStatusEl.textContent = text;
 }
 
 function append(text, className = '') {
@@ -111,6 +166,7 @@ function currentSettings() {
 function saveSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(currentSettings()));
   nekoInteractionId = null;
+  setGeminiStatus('저장됨');
   append('설정이 저장되었습니다. 네코의 대화 기억을 새로 시작합니다.');
 }
 
@@ -200,24 +256,52 @@ async function askNeko(question = '') {
 
   append('네코: 생각 중...');
   try {
-    const res = await fetch('/api/neko', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        apiKey: settings.apiKey,
-        model: settings.model || 'gemini-3.5-flash',
-        input,
-        systemInstruction: buildSystemInstruction(),
-        previousInteractionId: nekoInteractionId
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.message || data.error || 'Gemini 오류');
+    const data = await requestNeko(input, nekoInteractionId);
     if (data.id) nekoInteractionId = data.id;
     append(`네코: ${data.text || fallbackNeko(input)}`);
   } catch (error) {
     append(`네코: Gemini 연결 실패. ${error.message}`);
     append(`네코: ${fallbackNeko(input)}`);
+  }
+}
+
+async function requestNeko(input, previousInteractionId = null) {
+  const settings = currentSettings();
+  const res = await fetch('/api/neko', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      apiKey: settings.apiKey,
+      model: settings.model || 'gemini-3.5-flash',
+      input,
+      systemInstruction: buildSystemInstruction(),
+      previousInteractionId
+    })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.error || `Gemini HTTP ${res.status}`);
+  return data;
+}
+
+async function testGemini() {
+  if (!currentSettings().apiKey) {
+    setGeminiStatus('API 키 없음');
+    append('Gemini 확인: API 키를 먼저 입력하세요.');
+    return;
+  }
+
+  const button = document.getElementById('testGemini');
+  button.disabled = true;
+  setGeminiStatus('확인 중...');
+  try {
+    const data = await requestNeko('Gemini 연결 확인입니다. 네코답게 한 문장으로만 답하세요.');
+    setGeminiStatus('연결 성공');
+    append(`Gemini 확인 성공: ${data.text || '응답 수신'}`);
+  } catch (error) {
+    setGeminiStatus('연결 실패');
+    append(`Gemini 확인 실패: ${error.message}`);
+  } finally {
+    button.disabled = false;
   }
 }
 
@@ -234,8 +318,8 @@ function say(message) {
   const responders = roomUsers().filter((name) => !team.includes(name)).slice(0, 3);
   responders.forEach((name, index) => {
     const response = index === 0
-      ? `${message.includes('?') || message.includes('？') ? '그건 네코에게도 물어봐.' : '좋아, 같이 보자.'}`
-      : pick(['반가워.', '여기서 자주 보자.', '나도 방금 그 생각했어.', '주막 쪽 소문도 들어봐.']);
+      ? pickFresh(message.includes('?') || message.includes('？') ? questionResponses : sayResponses)
+      : pickFresh(sayResponses);
     append(`${name}: ${response}`);
   });
 }
@@ -302,7 +386,8 @@ function ambientChat() {
   if (!connected) return;
   const user = team.length && Math.random() > 0.55 ? pick(team) : pick(roomUsers());
   lastSpeaker = user;
-  append(`${user}: ${team.includes(user) ? pick(['내가 앞장설게.', '네코 말도 들어보자.', '다음 방까지 같이 가자.']) : pick(chatter)}`, team.includes(user) ? 'ally' : '');
+  const lines = team.includes(user) ? teamChatter : chatter.concat(roomChatter[roomName] || []);
+  append(`${user}: ${pickFresh(lines)}`, team.includes(user) ? 'ally' : '');
 }
 
 function connect() {
@@ -353,7 +438,7 @@ async function runCommand(raw) {
   else if (names.includes(command)) whisper(input);
   else say(input);
 
-  if (Math.random() > 0.6) append(`${lastSpeaker}: ${pick(['네코 말대로 해봐.', '좋은 질문이야.', '나도 따라갈게.', '잠깐, 주변을 먼저 봐.'])}`);
+  if (Math.random() > 0.6) append(`${lastSpeaker}: ${pickFresh(reactionChatter)}`);
 }
 
 connectBtn.addEventListener('click', connect);
@@ -363,6 +448,7 @@ nekoBtn.addEventListener('click', () => askNeko('도움'));
 checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '연결 가능' : 'API 키 대기'}\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
 document.getElementById('saveSettings').addEventListener('click', saveSettings);
 document.getElementById('randomSettings').addEventListener('click', makeRandomSettings);
+document.getElementById('testGemini').addEventListener('click', testGemini);
 
 formEl.addEventListener('submit', async (event) => {
   event.preventDefault();

@@ -41,12 +41,19 @@ module.exports = async function handler(req, res) {
       },
       body: JSON.stringify(payload)
     });
-    const data = await upstream.json();
+    const raw = await upstream.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch (error) {
+      data = {};
+    }
 
     if (!upstream.ok) {
       res.status(upstream.status).json({
         error: 'gemini_error',
-        message: data.error && data.error.message ? data.error.message : 'Gemini request failed'
+        message: data.error && data.error.message ? data.error.message : raw || 'Gemini request failed',
+        status: data.error && data.error.status ? data.error.status : null
       });
       return;
     }

@@ -153,6 +153,12 @@ input:disabled {
 .settings-actions {
   display: flex;
   gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.settings-status {
+  padding: 5px 0;
 }
 
 .menu {

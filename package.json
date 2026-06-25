@@ -1,6 +1,6 @@
 {
   "name": "muhan-web-runner",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "description": "Browser-playable web gateway for MUHAN with an optional Antigravity CLI console.",
   "type": "commonjs",
