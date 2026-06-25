@@ -4,11 +4,12 @@ const MAX_LINES = 700;
 const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.4';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.5';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
 const screenEl = document.getElementById('gameScreen');
+const statusPanelEl = document.getElementById('statusPanel');
 const commandEl = document.getElementById('gameCommand');
 const formEl = document.getElementById('gameForm');
 const connectBtn = document.getElementById('gameConnect');
@@ -50,6 +51,23 @@ const rooms = {
   '수련장': { exits: ['중앙광장'], desc: '낡은 목검과 허수아비가 줄지어 서 있다.' },
   '장터': { exits: ['주막'], desc: '상인들이 회복약과 낡은 장비를 펼쳐 놓았다.' },
   '초보사냥터': { exits: ['북문'], desc: '작은 괴물의 발자국이 흙길 위에 남아 있다.' }
+};
+
+const character = {
+  name: '무명초보',
+  job: '초보검객',
+  level: 1,
+  hp: '38/38',
+  mp: '12/12',
+  exp: '0%',
+  gold: 120,
+  equipment: {
+    무기: '낡은 목검',
+    방어구: '수련복',
+    장신구: '푸른 접속패',
+    동료: '네코'
+  },
+  inventory: ['회복약 x3', '귀환부 x1', '낡은 지도 조각', '주막 쿠폰']
 };
 
 const chatter = [
@@ -163,6 +181,27 @@ function clearScreen() {
 
 function appendNeko(text) {
   append(`네코: ${text}`, 'neko');
+}
+
+function renderStatusPanel() {
+  statusPanelEl.textContent = [
+    '[캐릭터]',
+    `이름: ${character.name}`,
+    `직업: ${character.job}`,
+    `레벨: ${character.level}`,
+    `HP: ${character.hp}`,
+    `MP: ${character.mp}`,
+    `EXP: ${character.exp}`,
+    `돈: ${character.gold} 전`,
+    `위치: ${roomName}`,
+    `팀: ${team.length ? team.join(', ') : '없음'}`,
+    '',
+    '[장비]',
+    ...Object.entries(character.equipment).map(([slot, item]) => `${slot}: ${item}`),
+    '',
+    '[보관 아이템]',
+    ...character.inventory.map((item, index) => `${index + 1}. ${item}`)
+  ].join('\n');
 }
 
 function currentSettings() {
@@ -369,6 +408,7 @@ function move(destination) {
   }
 
   roomName = target;
+  renderStatusPanel();
   append(`${roomName}(으)로 이동했다.`);
   if (team.length) append(`${team.join(', ')}: 같이 이동했어.`);
   look();
@@ -389,17 +429,19 @@ function teamUp(query) {
     return;
   }
   team.push(name);
+  renderStatusPanel();
   append(`${name}: 좋아, 같이 가자.`, 'ally');
   append(`현재 팀: ${team.join(', ')}`);
 }
 
 function clearTeam() {
   team = [];
+  renderStatusPanel();
   append('팀을 해산했습니다.');
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n도움              이 안내\n보기              현재 장소 보기\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀                현재 팀 보기\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n설정              설정창 보기\n랜덤              네코 설정 랜덤 생성\n설계도            게임 설계 요약\n\n예) 네코 어디로 가야 해?\n예) 1\n예) 팀 검객루안`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n도움              이 안내\n보기              현재 장소 보기\n상태              캐릭터 상태 갱신\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀                현재 팀 보기\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n설정              설정창 보기\n랜덤              네코 설정 랜덤 생성\n설계도            게임 설계 요약\n\n예) 네코 어디로 가야 해?\n예) 1\n예) 팀 검객루안`);
 }
 
 function blueprint() {
@@ -418,6 +460,7 @@ function connect() {
   if (connected) return;
 
   setConnected(true);
+  renderStatusPanel();
   setStatus('입장 완료', 'online');
   setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '브라우저 키 사용' : '서버 키 확인 대기'}\nAI 유저 100명 / 팀업 가능`);
   clearScreen();
@@ -433,6 +476,7 @@ function disconnect() {
   window.clearInterval(tickTimer);
   tickTimer = null;
   setConnected(false);
+  renderStatusPanel();
   setStatus('퇴장', 'offline');
   append('접속을 종료했습니다.');
 }
@@ -456,6 +500,7 @@ async function runCommand(raw) {
 
   if (['도움', 'help', '?', '명령'].includes(command)) help();
   else if (['보기', 'look', 'l'].includes(command)) look();
+  else if (['상태', '스탯', '장비', '아이템', 'status', 'stat'].includes(command)) renderStatusPanel();
   else if (['유저', '누구', 'users'].includes(command)) listUsers();
   else if (['말', '채팅', 'say'].includes(command)) say(body);
   else if (['귓', '귓속말', 'tell'].includes(command)) whisper(body);
@@ -513,6 +558,7 @@ window.addEventListener('beforeunload', () => window.clearInterval(tickTimer));
 
 loadSettings();
 setConnected(false);
+renderStatusPanel();
 setStatus('입장 대기', '');
 setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '브라우저 키 사용' : '서버 키 확인 대기'}\nAI 유저 100명 / 팀업 가능`);
 append('무한대전 PC통신 접속 대기');

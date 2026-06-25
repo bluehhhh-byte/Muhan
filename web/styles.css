@@ -168,15 +168,37 @@ input:disabled {
   margin-top: 10px;
 }
 
+.play-area {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .terminal {
   height: min(44vh, 420px);
-  margin-top: 10px;
   padding: 12px;
   overflow: auto;
   color: var(--white);
   background: var(--blue-dark);
   border: 1px solid var(--white);
   line-height: 1.45;
+}
+
+.status-panel {
+  height: min(44vh, 420px);
+  padding: 12px;
+  overflow: auto;
+  color: #99ff99;
+  background: var(--blue-dark);
+  border: 1px solid var(--white);
+  line-height: 1.45;
+}
+
+.status-panel pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .line {
@@ -248,8 +270,14 @@ input:disabled {
   .top-line,
   .menu,
   .commandbar,
-  .settings-grid {
+  .settings-grid,
+  .play-area {
     grid-template-columns: 1fr;
+  }
+
+  .status-panel {
+    height: auto;
+    max-height: 260px;
   }
 
   .top-line {
