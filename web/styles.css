@@ -176,7 +176,7 @@ input:disabled {
 }
 
 .terminal {
-  height: min(44vh, 420px);
+  height: min(58vh, 620px);
   padding: 12px;
   overflow: auto;
   color: var(--white);
@@ -186,7 +186,7 @@ input:disabled {
 }
 
 .status-panel {
-  height: min(44vh, 420px);
+  height: min(58vh, 620px);
   padding: 12px;
   overflow: auto;
   color: #99ff99;

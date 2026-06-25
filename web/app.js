@@ -4,7 +4,7 @@ const MAX_LINES = 700;
 const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.5';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.6';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
