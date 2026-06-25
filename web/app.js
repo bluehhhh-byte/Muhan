@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.8';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.9';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -23,7 +23,6 @@ const autoScrollEl = document.getElementById('autoScroll');
 const geminiStatusEl = document.getElementById('geminiTestStatus');
 
 const fields = {
-  apiKey: document.getElementById('geminiApiKey'),
   model: document.getElementById('geminiModel'),
   gender: document.getElementById('nekoGender'),
   tone: document.getElementById('nekoTone'),
@@ -239,7 +238,6 @@ function saveSettings() {
 
 function loadSettings() {
   const defaults = {
-    apiKey: '',
     model: DEFAULT_MODEL,
     gender: '검은 고양이',
     tone: '상냥하고 짧게 말함',
@@ -248,7 +246,10 @@ function loadSettings() {
     prompt: randomSettings.prompt[0]
   };
   const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  const values = { ...defaults, ...saved };
+  const values = { ...defaults };
+  for (const key of Object.keys(fields)) {
+    if (saved[key] !== undefined) values[key] = saved[key];
+  }
   if (values.model === 'gemini-3.5-flash') values.model = DEFAULT_MODEL;
   for (const [key, value] of Object.entries(values)) fields[key].value = value;
 }
@@ -294,7 +295,7 @@ function fallbackNeko(question = '') {
   if (/명령|도움|뭐.*해|방법/.test(q)) return '도움, 보기, 유저, 이동 장소, 말 내용, 귓 이름 내용, 팀 이름, 팀해산, 네코 질문을 쓸 수 있어.';
   if (/사람|유저|누구/.test(q)) return `가상 유저 100명이 접속 중이야. 이 방에는 ${roomUsers().slice(0, 6).join(', ')} 등이 있어.`;
   if (/사냥|전투|초보/.test(q)) return '처음이면 수련장으로 가고, 팀을 만든 뒤 북문을 지나 초보사냥터로 가면 안전해.';
-  return 'API 키를 설정하면 Gemini로 더 자연스럽게 대화할 수 있어. 지금은 기본 네코로 안내할게.';
+  return 'Gemini 서버 연결이 안 되면 기본 네코로 안내할게. 지금은 주변을 살피고 팀을 모으자.';
 }
 
 function buildSystemInstruction() {
@@ -334,7 +335,6 @@ function showChoices() {
 }
 
 async function askNeko(question = '') {
-  const settings = currentSettings();
   const input = question.trim() || '지금 무엇을 하면 좋을까?';
 
   appendNeko('생각 중...');
@@ -355,7 +355,6 @@ async function requestNeko(input, previousInteractionId = null) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      apiKey: settings.apiKey,
       model: settings.model || DEFAULT_MODEL,
       input,
       systemInstruction: buildSystemInstruction(),
@@ -488,11 +487,11 @@ function connect() {
   renderStatusPanel();
   saveGameState();
   setStatus('입장 완료', 'online');
-  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '브라우저 키 사용' : '서버 키 확인 대기'}\nAI 유저 100명 / 팀업 가능`);
+  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\nAI 유저 100명 / 팀업 가능`);
   clearScreen();
   append('무한대전에 입장했습니다.');
   append('검은 고양이 네코가 조용히 옆에 앉습니다.');
-  append('네코: 설정에 Gemini API 키를 넣거나 Vercel 환경변수 GEMINI_API_KEY를 쓰면 내가 대화해줄게.');
+  append('네코: Vercel 서버 키로 대화할게. 설정에서는 내 성격과 모델만 바꾸면 돼.');
   look();
   tickTimer = window.setInterval(ambientChat, 5000);
 }
@@ -552,7 +551,7 @@ connectBtn.addEventListener('click', connect);
 disconnectBtn.addEventListener('click', disconnect);
 clearBtn.addEventListener('click', clearScreen);
 nekoBtn.addEventListener('click', () => askNeko('도움'));
-checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '브라우저 키 사용' : '서버 키 확인 대기'}\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
+checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
 document.getElementById('saveSettings').addEventListener('click', saveSettings);
 document.getElementById('randomSettings').addEventListener('click', makeRandomSettings);
 document.getElementById('testGemini').addEventListener('click', testGemini);
@@ -594,7 +593,7 @@ loadGameState();
 setConnected(false);
 renderStatusPanel();
 setStatus('입장 대기', '');
-setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '브라우저 키 사용' : '서버 키 확인 대기'}\nAI 유저 100명 / 팀업 가능`);
+setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\nAI 유저 100명 / 팀업 가능`);
 append('무한대전 PC통신 접속 대기');
 append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 상태 확인');
-append('Gemini 키는 설정에 넣거나 Vercel 환경변수 GEMINI_API_KEY로 둘 수 있습니다.');
+append('Gemini 키는 Vercel 환경변수 GEMINI_API_KEY를 사용합니다.');

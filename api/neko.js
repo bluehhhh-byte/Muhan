@@ -15,9 +15,8 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const { apiKey, model, input, systemInstruction } = body;
+  const { model, input, systemInstruction } = body;
   const keyOptions = [
-    ['settings', apiKey],
     ['GEMINI_API_KEY', process.env.GEMINI_API_KEY],
     ['GOOGLE_API_KEY', process.env.GOOGLE_API_KEY]
   ].map(([source, value]) => [source, String(value || '').trim()]);
@@ -25,7 +24,7 @@ module.exports = async function handler(req, res) {
   if (!requestApiKey || !input) {
     res.status(400).json({
       error: 'missing_api_key_or_input',
-      message: 'Gemini API key is missing. Enter it in settings or set GEMINI_API_KEY or GOOGLE_API_KEY in Vercel.',
+      message: 'Gemini API key is missing. Set GEMINI_API_KEY or GOOGLE_API_KEY in Vercel.',
       keySource,
       env: {
         GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
