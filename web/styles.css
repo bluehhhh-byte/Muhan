@@ -170,7 +170,7 @@ input:disabled {
 
 .play-area {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: 260px minmax(0, 1fr);
   gap: 10px;
   margin-top: 10px;
 }

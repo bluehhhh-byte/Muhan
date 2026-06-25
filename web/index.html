@@ -4,14 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>무한대전</title>
-    <meta name="app-version" content="0.9.7" />
+    <meta name="app-version" content="0.9.8" />
     <meta http-equiv="cache-control" content="no-store" />
     <meta http-equiv="pragma" content="no-cache" />
     <meta http-equiv="expires" content="0" />
-    <link rel="stylesheet" href="/styles.css?v=0.9.7-save-state" />
+    <link rel="stylesheet" href="/styles.css?v=0.9.8-status-left" />
   </head>
   <body>
-    <main class="terminal-shell" data-ui-version="0.9.7">
+    <main class="terminal-shell" data-ui-version="0.9.8">
       <header class="top-line">
         <span>MUHAN NET 01410</span>
         <span id="status">상태 확인 중</span>
@@ -55,10 +55,10 @@
       </details>
 
       <section class="play-area" aria-label="게임 진행">
-        <div id="gameScreen" class="terminal" role="log" aria-label="게임 화면"></div>
         <aside class="status-panel" aria-label="캐릭터 정보">
           <pre id="statusPanel">캐릭터 정보 대기 중...</pre>
         </aside>
+        <div id="gameScreen" class="terminal" role="log" aria-label="게임 화면"></div>
       </section>
 
       <form id="gameForm" class="commandbar" autocomplete="off">
@@ -70,6 +70,6 @@
       <input id="autoScroll" type="checkbox" checked hidden />
     </main>
 
-    <script src="/app.js?v=0.9.7-save-state"></script>
+    <script src="/app.js?v=0.9.8-status-left"></script>
   </body>
 </html>
