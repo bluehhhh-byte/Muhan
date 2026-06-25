@@ -15,7 +15,7 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const { apiKey, model, input, systemInstruction, previousInteractionId } = body;
+  const { apiKey, model, input, systemInstruction } = body;
   const requestApiKey = String(apiKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '').trim();
   if (!requestApiKey || !input) {
     res.status(400).json({
@@ -38,16 +38,25 @@ module.exports = async function handler(req, res) {
     }
   };
 
-  if (previousInteractionId) payload.previous_interaction_id = previousInteractionId;
-
   try {
-    const upstream = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(payload.model)}:generateContent`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         'x-goog-api-key': requestApiKey
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        system_instruction: {
+          parts: [{ text: payload.system_instruction }]
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: payload.input }]
+          }
+        ],
+        generationConfig: payload.generation_config
+      })
     });
     const raw = await upstream.text();
     let data = {};
@@ -68,8 +77,8 @@ module.exports = async function handler(req, res) {
 
     res.setHeader('cache-control', 'no-store');
     res.status(200).json({
-      id: data.id || null,
-      text: data.output_text || ''
+      id: null,
+      text: ((data.candidates || [])[0]?.content?.parts || []).map((part) => part.text || '').join('')
     });
   } catch (error) {
     res.status(502).json({
