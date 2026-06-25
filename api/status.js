@@ -1,7 +1,7 @@
 'use strict';
 
 const STARTED_AT = new Date();
-const VERSION = '0.8.0';
+const VERSION = '0.9.0';
 
 module.exports = function handler(req, res) {
   res.setHeader('cache-control', 'no-store');
@@ -28,7 +28,7 @@ module.exports = function handler(req, res) {
     agent: {
       enabled: true,
       ready: true,
-      command: 'neko-browser-guide',
+      command: 'neko-gemini-guide',
       workdir: 'browser',
       websocketPath: null,
       activeSessions: 0,
