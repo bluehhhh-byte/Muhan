@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.3';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.4';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -98,7 +98,7 @@ const story = [
   { title: '환영 읽기', goal: '광장에서 환영 안내를 읽어라.', hint: '환영' },
   { title: '첫 임무', goal: '현감청에서 현감과 대화해 첫 임무를 받아라.', hint: '이동 현감청 → 대화 현감' },
   { title: '발자국 조사', goal: '초보사냥터에서 작은 괴물을 사냥해 증거를 얻어라.', hint: '이동 초보사냥터 → 사냥' },
-  { title: '첫 수련', goal: '경험과 돈을 모아 수련장에서 승급하라.', hint: '초보사냥터 → 사냥, 수련장 → 수련' },
+  { title: '첫 수련', goal: '사냥이나 수련으로 경험치를 쌓아 자동 승급하라.', hint: '초보사냥터 → 사냥 / 수련장 → 수련' },
   { title: '생명의나무', goal: '생명의나무의 안내자와 대화해 북문 단서를 확인하라.', hint: '이동 생명의나무 → 대화 안내자' },
   { title: '북문 조사', goal: '북문을 조사해 다음 장의 길을 열어라.', hint: '이동 북문 → 조사' },
   { title: '열린 대전', goal: '사냥, 수련, 대화, 팀업을 반복해 더 깊은 지역을 준비하라.', hint: '임무 / 사냥 / 수련 / 네코' }
@@ -271,10 +271,6 @@ function currentQuest() {
   return story[Math.min(character.storyStep, story.length - 1)];
 }
 
-function canAffordTraining() {
-  return character.exp >= character.expToLevel && character.gold >= character.expToLevel;
-}
-
 function nekoProfile() {
   const settings = currentSettings();
   const level = Math.max(1, Math.min(99, Number(settings.level) || 1));
@@ -364,7 +360,6 @@ function renderStatusPanel() {
     `정신: ${character.spirit}`,
     `성장: ${growth.label}`,
     `EXP: ${character.exp}/${character.expToLevel}`,
-    `수련비: ${character.expToLevel} 전`,
     `돈: ${character.gold} 전`,
     `위치: ${roomName}`,
     `팀: ${team.length ? team.join(', ') : '없음'}`,
@@ -402,31 +397,28 @@ function removeOneItem(name) {
   return index >= 0;
 }
 
-function levelUpAtTraining() {
+function autoLevelUp(source = '경험') {
   const growth = growthForJob();
-  const cost = character.expToLevel;
-  if (!canAffordTraining()) {
-    append(`수련 조건 부족. 필요: 경험 ${cost}, 돈 ${cost} 전 / 현재: 경험 ${character.exp}, 돈 ${character.gold} 전`);
-    return false;
+  let gained = 0;
+  while (character.exp >= character.expToLevel) {
+    character.exp -= character.expToLevel;
+    character.level += 1;
+    gained += 1;
+    character.title = titleForLevel(character.level);
+    character.hpMax += growth.hp;
+    character.mpMax += growth.mp;
+    character.attack += growth.attack;
+    character.defense += growth.defense;
+    character.spirit += growth.spirit;
+    character.hp = character.hpMax;
+    character.mp = character.mpMax;
+    character.expToLevel = expForLevel(character.level);
+    append(`\n[레벨 상승]\n${source}으로 레벨 ${character.level}이 되었습니다.\n직업 성장(${growth.label}): HP +${growth.hp}, MP +${growth.mp}, 공격 +${growth.attack}, 방어 +${growth.defense}, 정신 +${growth.spirit}`, 'choice');
   }
-
-  character.exp -= cost;
-  character.gold -= cost;
-  character.level += 1;
-  character.title = titleForLevel(character.level);
-  character.hpMax += growth.hp;
-  character.mpMax += growth.mp;
-  character.attack += growth.attack;
-  character.defense += growth.defense;
-  character.spirit += growth.spirit;
-  character.hp = character.hpMax;
-  character.mp = character.mpMax;
-  character.expToLevel = expForLevel(character.level);
-  append(`\n[수련 승급]\n경험 ${cost}, 돈 ${cost} 전을 지불했습니다.\n레벨 ${character.level}이 되었습니다.\n직업 성장(${growth.label}): HP +${growth.hp}, MP +${growth.mp}, 공격 +${growth.attack}, 방어 +${growth.defense}, 정신 +${growth.spirit}`, 'choice');
-  if (character.storyStep === 3 && character.level >= 2) {
+  if (gained && character.storyStep === 3 && character.level >= 2) {
     setStoryStep(4, '레벨이 올랐다. 생명의나무로 가서 안내자와 대화하자.');
   }
-  return true;
+  return gained;
 }
 
 function healCharacter(amount, source, className = 'ally') {
@@ -602,7 +594,7 @@ function showQuest() {
 }
 
 function welcome() {
-  append('\n[환영]\n무한대전은 광장에서 시작해 봐/조사로 주변을 읽고, 대화로 임무를 받고, 공격으로 경험과 돈을 얻는 PC통신식 MUD입니다.\n경험과 돈이 충분하면 수련장에서 수련비를 지불해 승급하고, HP가 낮으면 회복/사용 회복약/구매 회복약으로 버틸 수 있습니다.', 'room');
+  append('\n[환영]\n무한대전은 광장에서 시작해 봐/조사로 주변을 읽고, 대화로 임무를 받고, 공격과 수련으로 경험을 얻는 PC통신식 MUD입니다.\n경험치가 충분하면 자동으로 레벨이 오르고, HP가 낮으면 회복/사용 회복약/구매 회복약으로 버틸 수 있습니다.', 'room');
   if (character.storyStep === 0) setStoryStep(1, '현감청으로 가서 현감과 대화하자.');
   commitProgress();
   showChoices();
@@ -638,7 +630,7 @@ function talkNpc(input = '') {
     if (!hasItem('생명의나무 잎')) addItem('생명의나무 잎');
     if (character.storyStep === 4) setStoryStep(5, '북문으로 가서 성문 주변을 조사하자.');
   } else if (npc === '수련 교관') {
-    append(`수련 교관: 승급에는 경험 ${character.expToLevel}, 돈 ${character.expToLevel} 전이 필요하다. 사냥으로 모아 오면 직업에 맞게 강해진다.`, 'ally');
+    append('수련 교관: 이제 경험치가 차면 바로 몸이 반응한다. 수련은 경험을 안정적으로 쌓는 방법이다.', 'ally');
   } else if (npc === '약장수') {
     append('약장수: 회복약은 40 전, 생명환은 120 전이다. "품목"으로 보고 "구매 회복약"으로 사게.', 'ally');
   } else {
@@ -700,8 +692,10 @@ function hunt(input = '') {
     addItem(monster.item);
     append(`획득 물품: ${monster.item}`, 'ally');
   }
+  autoLevelUp('전투 경험');
   if (character.storyStep === 2) {
     setStoryStep(3, '증거를 얻었다. 수련장으로 가서 레벨을 올리자.');
+    if (character.level >= 2) setStoryStep(4, '레벨이 올랐다. 생명의나무로 가서 안내자와 대화하자.');
   }
   commitProgress();
   showChoices();
@@ -713,7 +707,13 @@ function trainCharacter() {
     return;
   }
 
-  levelUpAtTraining();
+  const neko = nekoProfile();
+  const expGain = Math.round((150 + character.level * 45) * Math.min(1.7, neko.growthRate));
+  const mpCost = Math.min(character.mp, 2);
+  character.mp -= mpCost;
+  character.exp += expGain;
+  append(`\n[수련]\n목검과 호흡을 맞춰 기본기를 다졌습니다.\n획득 경험 ${expGain}. MP ${mpCost} 소모. 경험치가 충분하면 자동으로 레벨이 오릅니다.`, 'choice');
+  autoLevelUp('수련 경험');
   commitProgress();
   showChoices();
 }
@@ -777,14 +777,9 @@ function storyChoice() {
   if (character.storyStep === 2) return roomName === '초보사냥터'
     ? { label: '작은 괴물 사냥', command: '사냥' }
     : { label: '초보사냥터로 이동', command: moveCommandToward('초보사냥터') };
-  if (character.storyStep === 3) {
-    if (!canAffordTraining()) return roomName === '초보사냥터'
-      ? { label: '수련비 모으기', command: '사냥' }
-      : { label: '수련비 모으러 이동', command: moveCommandToward('초보사냥터') };
-    return roomName === '수련장'
-      ? { label: '수련비 내고 승급', command: '수련' }
-      : { label: '수련장으로 이동', command: moveCommandToward('수련장') };
-  }
+  if (character.storyStep === 3) return roomName === '수련장'
+    ? { label: '수련하기', command: '수련' }
+    : { label: '수련장으로 이동', command: moveCommandToward('수련장') };
   if (character.storyStep === 4) return roomName === '생명의나무'
     ? { label: '안내자와 대화', command: '대화 안내자' }
     : { label: '생명의나무로 이동', command: moveCommandToward('생명의나무') };
@@ -820,13 +815,8 @@ function bestAutoChoice() {
     return { label: 'HP 회복', command: '회복' };
   }
   if (character.storyStep === 3 && character.level < 2) {
-    if (!canAffordTraining()) {
-      return roomName === '초보사냥터'
-        ? { label: '수련비 모으기', command: '사냥' }
-        : { label: '수련비 모으러 이동', command: moveCommandToward('초보사냥터') };
-    }
     return roomName === '수련장'
-      ? { label: '수련비 내고 승급', command: '수련' }
+      ? { label: '기본기 수련', command: '수련' }
       : { label: '수련장으로 이동', command: moveCommandToward('수련장') };
   }
   return choices.find((choice) => choice.command === '사냥')
@@ -1001,11 +991,11 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n환영              초보 안내\n임무              현재 스토리 목표\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              수련장에서 경험/돈을 지불해 승급\n회복              동료/네코 회복 지원\n품목              장터 상품 보기\n구매 회복약       장터에서 회복 아이템 구매\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 환영\n예) 사냥\n예) 수련\n예) 회복`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n환영              초보 안내\n임무              현재 스토리 목표\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코 회복 지원\n품목              장터 상품 보기\n구매 회복약       장터에서 회복 아이템 구매\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 환영\n예) 사냥\n예) 수련\n예) 회복`);
 }
 
 function blueprint() {
-  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥 → 경험/돈 축적 → 수련장에서 비용 지불 승급 → 직업별 능력치 성장 → 회복/상점/팀업으로 생존.\n새 핵심: 네코가 현재 임무와 상태를 읽고 1~4 행동을 추천한다.\n진행 방식: 환영 → 현감 → 초보사냥 → 수련 → 생명의나무 → 북문 조사.\n확장: 몬스터/지역/대화 조건만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
+  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 경험치 자동 레벨업 → 직업별 능력치 성장 → 회복/상점/팀업으로 생존.\n새 핵심: 네코가 현재 임무와 상태를 읽고 1~4 행동을 추천한다.\n진행 방식: 환영 → 현감 → 초보사냥 → 수련 → 생명의나무 → 북문 조사.\n확장: 몬스터/지역/대화 조건만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
 }
 
 function ambientChat() {
