@@ -4,7 +4,7 @@ const MAX_LINES = 700;
 const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.2';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.9.3';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -252,11 +252,6 @@ async function askNeko(question = '') {
   const settings = currentSettings();
   const input = question.trim() || '지금 무엇을 하면 좋을까?';
 
-  if (!settings.apiKey) {
-    append(`네코: ${fallbackNeko(input)}`);
-    return;
-  }
-
   append('네코: 생각 중...');
   try {
     const data = await requestNeko(input, nekoInteractionId);
@@ -287,12 +282,6 @@ async function requestNeko(input, previousInteractionId = null) {
 }
 
 async function testGemini() {
-  if (!currentSettings().apiKey) {
-    setGeminiStatus('API 키 없음');
-    append('Gemini 확인: API 키를 먼저 입력하세요.');
-    return;
-  }
-
   const button = document.getElementById('testGemini');
   button.disabled = true;
   setGeminiStatus('확인 중...');
@@ -398,11 +387,11 @@ function connect() {
 
   setConnected(true);
   setStatus('입장 완료', 'online');
-  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '연결 가능' : 'API 키 대기'}\nAI 유저 100명 / 팀업 가능`);
+  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '브라우저 키 사용' : '서버 키 확인 대기'}\nAI 유저 100명 / 팀업 가능`);
   clearScreen();
   append('무한대전에 입장했습니다.');
   append('검은 고양이 네코가 조용히 옆에 앉습니다.');
-  append('네코: 설정에서 Gemini API 키를 넣으면 내가 진짜로 대화해줄게. 우선 "네코 도움"이라고 해봐.');
+  append('네코: 설정에 Gemini API 키를 넣거나 Vercel 환경변수 GEMINI_API_KEY를 쓰면 내가 대화해줄게.');
   look();
   tickTimer = window.setInterval(ambientChat, 5000);
 }
@@ -448,7 +437,7 @@ connectBtn.addEventListener('click', connect);
 disconnectBtn.addEventListener('click', disconnect);
 clearBtn.addEventListener('click', clearScreen);
 nekoBtn.addEventListener('click', () => askNeko('도움'));
-checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '연결 가능' : 'API 키 대기'}\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
+checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '브라우저 키 사용' : '서버 키 확인 대기'}\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
 document.getElementById('saveSettings').addEventListener('click', saveSettings);
 document.getElementById('randomSettings').addEventListener('click', makeRandomSettings);
 document.getElementById('testGemini').addEventListener('click', testGemini);
@@ -485,7 +474,7 @@ window.addEventListener('beforeunload', () => window.clearInterval(tickTimer));
 loadSettings();
 setConnected(false);
 setStatus('입장 대기', '');
-setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '연결 가능' : 'API 키 대기'}\nAI 유저 100명 / 팀업 가능`);
+setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 ${currentSettings().apiKey ? '브라우저 키 사용' : '서버 키 확인 대기'}\nAI 유저 100명 / 팀업 가능`);
 append('무한대전 PC통신 접속 대기');
 append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 상태 확인');
-append('설정에서 Gemini API 키와 네코 성격을 넣거나 랜덤 생성하세요.');
+append('Gemini 키는 설정에 넣거나 Vercel 환경변수 GEMINI_API_KEY로 둘 수 있습니다.');

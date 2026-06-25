@@ -16,8 +16,9 @@ module.exports = async function handler(req, res) {
   }
 
   const { apiKey, model, input, systemInstruction, previousInteractionId } = body;
-  if (!apiKey || !input) {
-    res.status(400).json({ error: 'missing_api_key_or_input' });
+  const requestApiKey = apiKey || process.env.GEMINI_API_KEY;
+  if (!requestApiKey || !input) {
+    res.status(400).json({ error: 'missing_api_key_or_input', message: 'Gemini API key is missing. Enter it in settings or set GEMINI_API_KEY in Vercel.' });
     return;
   }
 
@@ -37,7 +38,7 @@ module.exports = async function handler(req, res) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-goog-api-key': apiKey
+        'x-goog-api-key': requestApiKey
       },
       body: JSON.stringify(payload)
     });
