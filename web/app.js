@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.5';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.6';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -47,13 +47,15 @@ const names = [
 
 const rooms = {
   '중앙광장': { exits: ['북문', '주막', '수련장', '현감청', '생명의나무'], desc: '푸른 전광판과 오래된 향로가 있는 시작 광장이다.' },
-  '북문': { exits: ['중앙광장', '초보사냥터'], desc: '성문 밖에서 낮은 북소리가 들리고 경비가 길을 막고 있다.' },
+  '북문': { exits: ['중앙광장', '초보사냥터', '북문 밖 숲'], desc: '성문 밖에서 낮은 북소리가 들리고 경비가 길을 막고 있다.' },
   '주막': { exits: ['중앙광장', '장터'], desc: '소문과 농담이 가장 빨리 모이는 곳이다.' },
   '수련장': { exits: ['중앙광장'], desc: '낡은 목검과 허수아비가 줄지어 서 있다.' },
   '현감청': { exits: ['중앙광장'], desc: '초보 모험가에게 첫 임무를 내리는 관아다.' },
   '생명의나무': { exits: ['중앙광장', '초보사냥터'], desc: '새 모험가들이 길을 묻는 거대한 나무가 뿌리를 드리우고 있다.' },
   '장터': { exits: ['주막'], desc: '상인들이 회복약과 낡은 장비를 펼쳐 놓았다.' },
-  '초보사냥터': { exits: ['북문', '생명의나무'], desc: '작은 괴물의 발자국이 흙길 위에 남아 있다.' }
+  '초보사냥터': { exits: ['북문', '생명의나무'], desc: '작은 괴물의 발자국이 흙길 위에 남아 있다.' },
+  '북문 밖 숲': { exits: ['북문', '폐광 입구'], desc: '안개 낀 숲길 사이로 오래된 발자국과 새 발자국이 겹쳐 있다.' },
+  '폐광 입구': { exits: ['북문 밖 숲'], desc: '무너진 광차와 검은 돌가루가 폐광의 입을 막고 있다.' }
 };
 
 const jobGrowth = {
@@ -66,7 +68,34 @@ const jobGrowth = {
 
 const shopItems = {
   '회복약': { price: 40, heal: 999, desc: 'HP를 모두 회복한다.' },
-  '생명환': { price: 120, heal: 28, desc: '전투 중 버티기 좋은 회복 알약이다.' }
+  '생명환': { price: 120, heal: 28, desc: '전투 중 버티기 좋은 회복 알약이다.' },
+  '청동검': { price: 180, desc: '공격 +4 무기.' },
+  '가죽갑옷': { price: 160, desc: '방어 +3 방어구.' },
+  '수련 부적': { price: 220, desc: '정신 +3 장신구.' }
+};
+
+const equipmentCatalog = {
+  '낡은 목검': { slot: '무기', attack: 1 },
+  '수련복': { slot: '방어구', defense: 1 },
+  '푸른 접속패': { slot: '장신구', spirit: 1 },
+  '청동검': { slot: '무기', attack: 4 },
+  '가죽갑옷': { slot: '방어구', defense: 3 },
+  '수련 부적': { slot: '장신구', spirit: 3 },
+  '광부의 곡괭이': { slot: '무기', attack: 6, defense: 1 }
+};
+
+const allyRoles = [
+  { label: '공격형', attack: 4, defense: 0, heal: 0 },
+  { label: '수호형', attack: 1, defense: 4, heal: 0 },
+  { label: '회복형', attack: 0, defense: 1, heal: 7 },
+  { label: '정찰형', attack: 2, defense: 1, heal: 2 }
+];
+
+const monsterTraits = {
+  '기습': { damage: 4, expRate: 1.05, text: '기습으로 먼저 달려든다.' },
+  '단단함': { damage: 2, expRate: 1.1, text: '단단한 껍질로 버틴다.' },
+  '독': { damage: 6, expRate: 1.15, text: '독 기운이 상처를 파고든다.' },
+  '우두머리': { damage: 8, expRate: 1.35, goldRate: 1.4, text: '주변 괴물을 부리는 우두머리다.' }
 };
 
 const character = {
@@ -101,7 +130,9 @@ const story = [
   { title: '첫 수련', goal: '사냥이나 수련으로 경험치를 쌓아 자동 승급하라.', hint: '초보사냥터 → 사냥 / 수련장 → 수련' },
   { title: '생명의나무', goal: '생명의나무의 안내자와 대화해 북문 단서를 확인하라.', hint: '이동 생명의나무 → 대화 안내자' },
   { title: '북문 조사', goal: '북문을 조사해 다음 장의 길을 열어라.', hint: '이동 북문 → 조사' },
-  { title: '열린 대전', goal: '사냥, 수련, 대화, 팀업을 반복해 더 깊은 지역을 준비하라.', hint: '임무 / 사냥 / 수련 / 네코' }
+  { title: '숲길 정찰', goal: '북문 밖 숲을 조사해 폐광 입구를 찾아라.', hint: '이동 북문 밖 숲 → 조사' },
+  { title: '폐광 입구', goal: '폐광 입구의 우두머리를 쓰러뜨려 새 장비를 얻어라.', hint: '이동 폐광 입구 → 사냥' },
+  { title: '열린 대전', goal: '사냥, 수련, 장비, 팀업을 반복해 더 깊은 지역을 준비하라.', hint: '임무 / 사냥 / 착용 / 팀교체 / 네코' }
 ];
 
 const roomNpcs = {
@@ -112,17 +143,26 @@ const roomNpcs = {
   '장터': ['약장수'],
   '북문': ['북문 경비'],
   '초보사냥터': ['겁먹은 나그네'],
+  '북문 밖 숲': ['숲길 파수꾼'],
+  '폐광 입구': ['낡은 광부'],
   '수련장': ['수련 교관']
 };
 
 const roomEncounters = {
   '초보사냥터': [
-    { name: '들쥐', hp: 10, exp: 120, gold: 35, item: '작은 송곳니' },
-    { name: '흙도깨비', hp: 16, exp: 180, gold: 55, item: '짐승의 발톱' },
-    { name: '떠도는 그림자', hp: 22, exp: 240, gold: 75, item: '낡은 부적 조각' }
+    { name: '들쥐', hp: 10, exp: 120, gold: 35, item: '작은 송곳니', trait: '기습' },
+    { name: '흙도깨비', hp: 16, exp: 180, gold: 55, item: '짐승의 발톱', trait: '단단함' },
+    { name: '떠도는 그림자', hp: 22, exp: 240, gold: 75, item: '낡은 부적 조각', trait: '독' }
   ],
   '북문': [
-    { name: '성문 박쥐', hp: 18, exp: 160, gold: 45, item: '박쥐 날개' }
+    { name: '성문 박쥐', hp: 18, exp: 160, gold: 45, item: '박쥐 날개', trait: '기습' }
+  ],
+  '북문 밖 숲': [
+    { name: '안개 늑대', hp: 30, exp: 320, gold: 110, item: '안개 송곳니', trait: '기습' },
+    { name: '독버섯 정령', hp: 26, exp: 300, gold: 95, item: '푸른 포자', trait: '독' }
+  ],
+  '폐광 입구': [
+    { name: '폐광 우두머리', hp: 46, exp: 520, gold: 220, item: '광부의 곡괭이', trait: '우두머리' }
   ]
 };
 
@@ -271,6 +311,57 @@ function currentQuest() {
   return story[Math.min(character.storyStep, story.length - 1)];
 }
 
+function itemStats(item) {
+  return equipmentCatalog[item] || {};
+}
+
+function equipmentBonus() {
+  return Object.values(character.equipment).reduce((bonus, item) => {
+    const stats = itemStats(item);
+    bonus.attack += stats.attack || 0;
+    bonus.defense += stats.defense || 0;
+    bonus.spirit += stats.spirit || 0;
+    return bonus;
+  }, { attack: 0, defense: 0, spirit: 0 });
+}
+
+function effectiveStats() {
+  const bonus = equipmentBonus();
+  return {
+    attack: character.attack + bonus.attack,
+    defense: character.defense + bonus.defense,
+    spirit: character.spirit + bonus.spirit
+  };
+}
+
+function itemBonusText(item) {
+  const stats = itemStats(item);
+  return [
+    stats.attack ? `공격 +${stats.attack}` : '',
+    stats.defense ? `방어 +${stats.defense}` : '',
+    stats.spirit ? `정신 +${stats.spirit}` : ''
+  ].filter(Boolean).join(', ');
+}
+
+function allyRole(name) {
+  const index = Math.max(0, names.indexOf(name));
+  return allyRoles[index % allyRoles.length];
+}
+
+function teamPower() {
+  return team.reduce((power, name) => {
+    const role = allyRole(name);
+    power.attack += role.attack;
+    power.defense += role.defense;
+    power.heal += role.heal;
+    return power;
+  }, { attack: 0, defense: 0, heal: 0 });
+}
+
+function teamLabel() {
+  return team.length ? team.map((name) => `${name}(${allyRole(name).label})`).join(', ') : '없음';
+}
+
 function nekoProfile() {
   const settings = currentSettings();
   const level = Math.max(1, Math.min(99, Number(settings.level) || 1));
@@ -347,6 +438,7 @@ function loadGameState() {
 function renderStatusPanel() {
   const neko = nekoProfile();
   const growth = growthForJob();
+  const stats = effectiveStats();
   statusPanelEl.textContent = [
     '[캐릭터]',
     `이름: ${character.name}`,
@@ -355,14 +447,14 @@ function renderStatusPanel() {
     `레벨: ${character.level}`,
     `HP: ${character.hp}/${character.hpMax}`,
     `MP: ${character.mp}/${character.mpMax}`,
-    `공격: ${character.attack}`,
-    `방어: ${character.defense}`,
-    `정신: ${character.spirit}`,
+    `공격: ${stats.attack} (${character.attack})`,
+    `방어: ${stats.defense} (${character.defense})`,
+    `정신: ${stats.spirit} (${character.spirit})`,
     `성장: ${growth.label}`,
     `EXP: ${character.exp}/${character.expToLevel}`,
     `돈: ${character.gold} 전`,
     `위치: ${roomName}`,
-    `팀: ${team.length ? team.join(', ') : '없음'}`,
+    `팀: ${teamLabel()}`,
     '',
     '[현재 임무]',
     currentQuest().title,
@@ -376,7 +468,7 @@ function renderStatusPanel() {
     `자동 진행: ${autoProgress ? '켜짐' : '꺼짐'}`,
     '',
     '[장비]',
-    ...Object.entries(character.equipment).map(([slot, item]) => `${slot}: ${item}`),
+    ...Object.entries(character.equipment).map(([slot, item]) => `${slot}: ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}`),
     '',
     '[보관 아이템]',
     ...character.inventory.map((item, index) => `${index + 1}. ${item}`)
@@ -440,8 +532,10 @@ function nekoHeal() {
 function allyHeal() {
   if (!team.length) return 0;
   const healer = pick(team);
-  const amount = 5 + team.length * 4 + Math.floor(character.spirit / 2);
-  return healCharacter(amount, `${healer}의 응급 회복술`, 'ally');
+  const role = allyRole(healer);
+  const stats = effectiveStats();
+  const amount = 5 + team.length * 3 + teamPower().heal + Math.floor(stats.spirit / 2);
+  return healCharacter(amount, `${healer}(${role.label})의 응급 회복술`, 'ally');
 }
 
 function autoRecoverIfCritical() {
@@ -481,7 +575,7 @@ function showShop() {
     showChoices();
     return;
   }
-  append(`\n[장터 품목]\n${Object.entries(shopItems).map(([name, item]) => `${name}: ${item.price} 전 - ${item.desc}`).join('\n')}\n구매 예) 구매 회복약`, 'room');
+  append(`\n[장터 품목]\n${Object.entries(shopItems).map(([name, item]) => `${name}: ${item.price} 전 - ${item.desc}`).join('\n')}\n구매 예) 구매 회복약 / 구매 청동검`, 'room');
   showChoices();
 }
 
@@ -606,7 +700,11 @@ function inspectRoom() {
   append(`\n[조사]\n${rooms[roomName].desc}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n임무 힌트: ${currentQuest().hint}`, 'room');
   if (roomName === '북문' && character.storyStep === 5) {
     addItem('북문 경비의 표식');
-    setStoryStep(6, '북문 조사를 마쳤다. 이제 사냥, 수련, 대화로 다음 장을 준비하자.');
+    setStoryStep(6, '북문 조사를 마쳤다. 북문 밖 숲으로 나가 새 발자국을 확인하자.');
+    commitProgress();
+  }
+  if (roomName === '북문 밖 숲' && character.storyStep === 6) {
+    setStoryStep(7, '숲길 끝에서 폐광 입구를 찾았다. 폐광 입구로 가서 우두머리를 상대하자.');
     commitProgress();
   }
   showChoices();
@@ -633,6 +731,10 @@ function talkNpc(input = '') {
     append('수련 교관: 이제 경험치가 차면 바로 몸이 반응한다. 수련은 경험을 안정적으로 쌓는 방법이다.', 'ally');
   } else if (npc === '약장수') {
     append('약장수: 회복약은 40 전, 생명환은 120 전이다. "품목"으로 보고 "구매 회복약"으로 사게.', 'ally');
+  } else if (npc === '숲길 파수꾼') {
+    append('숲길 파수꾼: 안개 늑대는 먼저 달려든다. 방어형 동료나 갑옷이 있으면 훨씬 버틴다.', 'ally');
+  } else if (npc === '낡은 광부') {
+    append('낡은 광부: 폐광 우두머리는 느리지만 세다. 이기면 쓸 만한 곡괭이를 얻을 수 있다.', 'ally');
   } else {
     append(`${npc}: ${pickFresh(roomChatter[roomName] || chatter)}`, 'ally');
   }
@@ -646,11 +748,13 @@ function showInventory() {
 
 function showScore() {
   renderStatusPanel();
-  append(`\n[점수]\n${character.title} ${character.name} / 레벨 ${character.level} ${character.job}\nHP ${character.hp}/${character.hpMax}  MP ${character.mp}/${character.mpMax}\n공격 ${character.attack}  방어 ${character.defense}  정신 ${character.spirit}\nEXP ${character.exp}/${character.expToLevel}  돈 ${character.gold} 전\n현재 임무: ${currentQuest().title}`);
+  const stats = effectiveStats();
+  append(`\n[점수]\n${character.title} ${character.name} / 레벨 ${character.level} ${character.job}\nHP ${character.hp}/${character.hpMax}  MP ${character.mp}/${character.mpMax}\n공격 ${stats.attack}  방어 ${stats.defense}  정신 ${stats.spirit}\nEXP ${character.exp}/${character.expToLevel}  돈 ${character.gold} 전\n현재 임무: ${currentQuest().title}`);
 }
 
 function useItem(input = '') {
-  const itemName = Object.keys(shopItems).find((name) => input.includes(name)) || (/약/.test(input) ? '회복약' : '');
+  const usableItems = Object.keys(shopItems).filter((name) => shopItems[name].heal);
+  const itemName = usableItems.find((name) => input.includes(name)) || (/약/.test(input) ? '회복약' : '');
   if (!itemName) {
     append('사용할 물건을 입력하세요. 예) 사용 회복약');
     return;
@@ -669,6 +773,27 @@ function useItem(input = '') {
   showChoices();
 }
 
+function equipItem(input = '') {
+  const itemName = Object.keys(equipmentCatalog).find((name) => input.includes(name));
+  if (!itemName) {
+    append('착용할 장비를 입력하세요. 예) 착용 청동검');
+    return;
+  }
+  if (!hasItem(itemName)) {
+    append(`${itemName}이(가) 보관함에 없습니다. 장터에서 구매하거나 사냥으로 얻으세요.`);
+    return;
+  }
+
+  const slot = equipmentCatalog[itemName].slot;
+  const oldItem = character.equipment[slot];
+  removeOneItem(itemName);
+  if (oldItem) addItem(oldItem);
+  character.equipment[slot] = itemName;
+  commitProgress();
+  append(`${slot}에 ${itemName}을(를) 착용했습니다.${itemBonusText(itemName) ? ` ${itemBonusText(itemName)}.` : ''}`, 'ally');
+  showChoices();
+}
+
 function hunt(input = '') {
   const encounters = roomEncounters[roomName] || [];
   if (!encounters.length) {
@@ -678,15 +803,18 @@ function hunt(input = '') {
 
   const monster = encounters.find((item) => input && item.name.includes(input.trim())) || pick(encounters);
   const neko = nekoProfile();
-  const attackPower = character.attack + team.length * 3 + neko.combat;
-  const guardPower = character.defense + team.length * 2 + neko.guard;
-  const damage = Math.max(1, Math.ceil(monster.hp * 0.45) - guardPower);
-  const expGain = Math.round(monster.exp * neko.growthRate);
-  const goldGain = Math.round(monster.gold * neko.goldRate);
+  const stats = effectiveStats();
+  const allies = teamPower();
+  const trait = monsterTraits[monster.trait] || {};
+  const attackPower = stats.attack + allies.attack + neko.combat;
+  const guardPower = stats.defense + allies.defense + neko.guard;
+  const damage = Math.max(1, Math.ceil(monster.hp * 0.45) + (trait.damage || 0) - guardPower);
+  const expGain = Math.round(monster.exp * (trait.expRate || 1) * neko.growthRate);
+  const goldGain = Math.round(monster.gold * (trait.goldRate || 1) * neko.goldRate);
   character.hp = Math.max(1, character.hp - damage);
   character.exp += expGain;
   character.gold += goldGain;
-  append(`\n[전투]\n${monster.name}을(를) 공격했다.\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.\n피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
+  append(`\n[전투]\n${monster.name}을(를) 공격했다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.\n피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
   autoRecoverIfCritical();
   if (monster.item && !hasItem(monster.item)) {
     addItem(monster.item);
@@ -696,6 +824,9 @@ function hunt(input = '') {
   if (character.storyStep === 2) {
     setStoryStep(3, '증거를 얻었다. 수련장으로 가서 레벨을 올리자.');
     if (character.level >= 2) setStoryStep(4, '레벨이 올랐다. 생명의나무로 가서 안내자와 대화하자.');
+  }
+  if (roomName === '폐광 입구' && character.storyStep === 7) {
+    setStoryStep(8, '폐광 입구의 우두머리를 넘겼다. 이제 장비와 팀을 갖추고 더 깊은 지역을 준비하자.');
   }
   commitProgress();
   showChoices();
@@ -722,8 +853,9 @@ function fallbackNeko(question = '') {
   const q = question.trim();
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
+  if (/장비|착용|무기/.test(q)) return '장터에서 청동검, 가죽갑옷, 수련 부적을 살 수 있어. 산 다음 "착용 장비명"이라고 해.';
   if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
-  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 점수, 소지품, 이동 장소를 쓸 수 있어.';
+  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 점수, 소지품, 이동 장소를 쓸 수 있어.';
   if (/회복|피|HP|hp|죽/.test(q)) return 'HP가 낮으면 "회복"이라고 해. 동료와 내가 먼저 돕고, 부족하면 회복약을 써. 장터에서는 "구매 회복약"도 가능해.';
   if (/사람|유저|누구/.test(q)) return `가상 유저 100명이 접속 중이야. 이 방에는 ${roomUsers().slice(0, 6).join(', ')} 등이 있어.`;
   if (/사냥|전투|초보/.test(q)) return '처음이면 수련장으로 가고, 팀을 만든 뒤 북문을 지나 초보사냥터로 가면 안전해.';
@@ -748,7 +880,7 @@ function buildSystemInstruction() {
     `소지품: ${character.inventory.join(', ')}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -786,6 +918,12 @@ function storyChoice() {
   if (character.storyStep === 5) return roomName === '북문'
     ? { label: '북문 조사', command: '조사' }
     : { label: '북문으로 이동', command: moveCommandToward('북문') };
+  if (character.storyStep === 6) return roomName === '북문 밖 숲'
+    ? { label: '숲길 조사', command: '조사' }
+    : { label: '북문 밖 숲으로 이동', command: moveCommandToward('북문 밖 숲') };
+  if (character.storyStep === 7) return roomName === '폐광 입구'
+    ? { label: '폐광 우두머리 사냥', command: '사냥 폐광 우두머리' }
+    : { label: '폐광 입구로 이동', command: moveCommandToward('폐광 입구') };
   return { label: '현재 임무 확인', command: '임무' };
 }
 
@@ -801,6 +939,7 @@ function makeChoices() {
     shop,
     combat,
     roomName === '수련장' ? { label: '수련하기', command: '수련' } : null,
+    roomName === '장터' ? { label: '청동검 구매', command: '구매 청동검' } : null,
     { label: `${room.exits[0] || roomName}(으)로 이동`, command: `이동 ${room.exits[0] || roomName}` },
     { label: `${candidate}에게 말 걸기`, command: `귓 ${candidate} 여기서 무엇을 조심해야 해?` },
     { label: `${candidate} 팀 영입`, command: `팀 ${candidate}` },
@@ -1010,11 +1149,11 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n환영              초보 안내\n임무              현재 스토리 목표\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코 회복 지원\n품목              장터 상품 보기\n구매 회복약       장터에서 회복 아이템 구매\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 환영\n예) 사냥\n예) 팀 검객루안\n예) 팀교체 검객루안 달빛상인\n예) 팀해산`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n환영              초보 안내\n임무              현재 스토리 목표\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코 회복 지원\n품목              장터 상품 보기\n구매 회복약       장터에서 회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 구매 청동검\n예) 착용 청동검\n예) 이동 북문 밖 숲\n예) 팀교체 검객루안 달빛상인`);
 }
 
 function blueprint() {
-  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 경험치 자동 레벨업 → 직업별 능력치 성장 → 회복/상점/팀업으로 생존.\n새 핵심: 네코가 현재 임무와 상태를 읽고 1~4 행동을 추천한다.\n진행 방식: 환영 → 현감 → 초보사냥 → 수련 → 생명의나무 → 북문 조사.\n확장: 몬스터/지역/대화 조건만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
+  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 경험치 자동 레벨업 → 장비 착용 → 팀 역할 조합 → 새 지역 정찰.\n새 핵심: 장비와 팀 역할이 전투력에 반영되고, 북문 밖 숲과 폐광 입구로 다음 장이 열린다.\n진행 방식: 환영 → 현감 → 초보사냥 → 수련 → 생명의나무 → 북문 조사 → 북문 밖 숲 → 폐광 입구.\n확장: 몬스터/지역/대화 조건만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
 }
 
 function ambientChat() {
@@ -1083,6 +1222,7 @@ async function runCommand(raw) {
   else if (['회복', '치료', 'heal'].includes(command)) recoverHp();
   else if (['품목', '상점', 'shop'].includes(command)) showShop();
   else if (['구매', '구입', '사', 'buy'].includes(command)) buyItem(body);
+  else if (['착용', '장착', 'equip'].includes(command)) equipItem(body);
   else if (['소지품', '소지', 'inventory'].includes(command)) showInventory();
   else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();
   else if (['사용', '마셔', '먹어'].includes(command)) useItem(body);
