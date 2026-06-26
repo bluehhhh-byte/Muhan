@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.4';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.5';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -721,7 +721,7 @@ function trainCharacter() {
 function fallbackNeko(question = '') {
   const q = question.trim();
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
-  if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 말해봐. 최대 4명까지 함께 움직일 수 있어.';
+  if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
   if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
   if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 점수, 소지품, 이동 장소를 쓸 수 있어.';
   if (/회복|피|HP|hp|죽/.test(q)) return 'HP가 낮으면 "회복"이라고 해. 동료와 내가 먼저 돕고, 부족하면 회복약을 써. 장터에서는 "구매 회복약"도 가능해.';
@@ -748,7 +748,7 @@ function buildSystemInstruction() {
     `소지품: ${character.inventory.join(', ')}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -975,12 +975,31 @@ function teamUp(query) {
     return;
   }
   if (team.length >= 4) {
-    append('팀은 최대 4명까지입니다. 먼저 팀해산을 하거나 다음 버전에서 교체 기능을 쓰세요.');
+    append('팀은 최대 4명까지입니다. "팀교체 기존이름 새이름" 또는 "팀해산"을 쓰세요.');
     return;
   }
   team.push(name);
   commitProgress();
   append(`${name}: 좋아, 같이 가자.`, 'ally');
+  append(`현재 팀: ${team.join(', ')}`);
+}
+
+function replaceTeamMember(input = '') {
+  const [oldQuery, newQuery] = input.trim().split(/\s+/);
+  const oldName = findUser(oldQuery || '');
+  const newName = findUser(newQuery || '');
+  const index = oldName ? team.indexOf(oldName) : -1;
+  if (index < 0 || !newName) {
+    append(`사용법: 팀교체 기존이름 새이름\n현재 팀: ${team.length ? team.join(', ') : '없음'}`);
+    return;
+  }
+  if (team.includes(newName)) {
+    append(`${newName}은 이미 팀에 있습니다.`);
+    return;
+  }
+  team[index] = newName;
+  commitProgress();
+  append(`${oldName}이(가) 물러나고 ${newName}이(가) 합류했습니다.`, 'ally');
   append(`현재 팀: ${team.join(', ')}`);
 }
 
@@ -991,7 +1010,7 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n환영              초보 안내\n임무              현재 스토리 목표\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코 회복 지원\n품목              장터 상품 보기\n구매 회복약       장터에서 회복 아이템 구매\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 환영\n예) 사냥\n예) 수련\n예) 회복`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n환영              초보 안내\n임무              현재 스토리 목표\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코 회복 지원\n품목              장터 상품 보기\n구매 회복약       장터에서 회복 아이템 구매\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 환영\n예) 사냥\n예) 팀 검객루안\n예) 팀교체 검객루안 달빛상인\n예) 팀해산`);
 }
 
 function blueprint() {
@@ -1078,6 +1097,7 @@ async function runCommand(raw) {
   else if (['말', '채팅', 'say'].includes(command)) say(body);
   else if (['귓', '귓속말', 'tell'].includes(command)) whisper(body);
   else if (['이동', '가', 'move'].includes(command)) move(body);
+  else if (['팀교체', '파티교체', '교체'].includes(command)) replaceTeamMember(body);
   else if (['팀', '파티'].includes(command) && body) teamUp(body);
   else if (['팀', '파티'].includes(command)) append(`현재 팀: ${team.length ? team.join(', ') : '없음'}`);
   else if (['팀해산', '파티해산'].includes(command)) clearTeam();

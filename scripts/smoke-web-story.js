@@ -86,6 +86,12 @@ async function submit(command) {
 
 (async () => {
   elements.gameConnect.listeners.click();
+  await submit('팀 검객루안');
+  if (!elements.statusPanel.textContent.includes('팀: 검객루안')) throw new Error('팀 영입 실패');
+  await submit('팀교체 검객루안 달빛상인');
+  if (!elements.statusPanel.textContent.includes('팀: 달빛상인')) throw new Error('팀 교체 실패');
+  await submit('팀해산');
+  if (!elements.statusPanel.textContent.includes('팀: 없음')) throw new Error('팀 해산 실패');
   await submit('환영');
   if (!elements.statusPanel.textContent.includes('첫 임무')) throw new Error('환영 이후 첫 임무로 진행되지 않음');
   await submit('1');
