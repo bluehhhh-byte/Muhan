@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.22.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.23.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -33,6 +33,7 @@ const fields = {
   risk: document.getElementById('nekoRisk'),
   memoryMode: document.getElementById('nekoMemoryMode'),
   level: document.getElementById('nekoLevel'),
+  luck: document.getElementById('nekoLuck'),
   ability: document.getElementById('nekoAbility'),
   prompt: document.getElementById('nekoPrompt')
 };
@@ -445,6 +446,7 @@ const randomSettings = {
   risk: ['균형', '안전', '공격'],
   memoryMode: ['요약 기억', '전투 우선', '탐험 우선', '대화 우선'],
   level: ['7', '13', '21', '44', '99'],
+  luck: ['5', '12', '21', '34', '55'],
   ability: ['길찾기와 명령어 해석', '위험 예지', '가상 유저 설득', '숨겨진 소문 탐지', '전투 전술 조언'],
   prompt: [
     '네코는 무한대전의 오래된 접속 기록을 읽을 수 있다. 플레이어가 길을 잃으면 장소, 유저, 다음 행동을 짧게 제안한다.',
@@ -495,6 +497,7 @@ let autoRoomCommands = [];
 let autoShopCooldown = 0;
 let visitedRooms = new Set([roomName]);
 let resolvedEvents = new Set();
+let customItems = {};
 let rogue = {
   active: false,
   depth: 0,
@@ -526,7 +529,7 @@ function pickFresh(list) {
 }
 
 function defaultNekoMemory() {
-  return { level: 1, exp: 0, conversations: 0, battles: 0, events: 0, expeditions: 0, notes: [] };
+  return { level: 1, exp: 0, conversations: 0, battles: 0, events: 0, expeditions: 0, fusions: 0, notes: [] };
 }
 
 function loadNekoMemory() {
@@ -551,7 +554,7 @@ function saveNekoMemory() {
 }
 
 function rememberNeko(kind, note = '', amount = 1) {
-  const key = { 대화: 'conversations', 전투: 'battles', 사건: 'events', 원정: 'expeditions' }[kind];
+  const key = { 대화: 'conversations', 전투: 'battles', 사건: 'events', 원정: 'expeditions', 연성: 'fusions' }[kind];
   const mode = fields.memoryMode?.value || '요약 기억';
   if ((mode === '전투 우선' && kind === '전투') || (mode === '탐험 우선' && kind === '원정') || (mode === '대화 우선' && kind === '대화')) amount += 1;
   if (key) nekoMemory[key] += 1;
@@ -566,7 +569,7 @@ function rememberNeko(kind, note = '', amount = 1) {
 function nekoMemoryText() {
   return [
     `지능 Lv.${nekoMemory.level}, 학습 ${nekoMemory.exp}`,
-    `대화 ${nekoMemory.conversations}, 전투 ${nekoMemory.battles}, 사건 ${nekoMemory.events}, 원정 ${nekoMemory.expeditions}`,
+    `대화 ${nekoMemory.conversations}, 전투 ${nekoMemory.battles}, 사건 ${nekoMemory.events}, 원정 ${nekoMemory.expeditions}, 연성 ${nekoMemory.fusions}`,
     `최근 기억: ${nekoMemory.notes.join(' / ') || '없음'}`
   ].join('\n');
 }
@@ -800,16 +803,20 @@ function currentQuest() {
 }
 
 function itemStats(item) {
-  return equipmentCatalog[item] || {};
+  return customItems[item] || equipmentCatalog[item] || {};
+}
+
+function equipmentNames() {
+  return Object.keys({ ...equipmentCatalog, ...customItems });
 }
 
 function equipmentScore(item) {
   const stats = itemStats(item);
-  return (stats.attack || 0) * 3 + (stats.defense || 0) * 2 + (stats.spirit || 0);
+  return (stats.attack || 0) * 3 + (stats.defense || 0) * 2 + (stats.spirit || 0) + (stats.luck || 0) + (stats.special ? 8 : 0);
 }
 
 function isBetterEquipment(item) {
-  const slot = equipmentCatalog[item]?.slot;
+  const slot = itemStats(item).slot;
   return Boolean(slot && character.equipment[slot] !== item && equipmentScore(item) > equipmentScore(character.equipment[slot]));
 }
 
@@ -819,8 +826,9 @@ function equipmentBonus() {
     total.attack += stats.attack || 0;
     total.defense += stats.defense || 0;
     total.spirit += stats.spirit || 0;
+    total.luck += stats.luck || 0;
     return total;
-  }, { attack: 0, defense: 0, spirit: 0 });
+  }, { attack: 0, defense: 0, spirit: 0, luck: 0 });
   bonus.attack += (Number(character.upgrades.무기) || 0) * 2;
   bonus.defense += (Number(character.upgrades.방어구) || 0) * 2;
   bonus.spirit += (Number(character.upgrades.장신구) || 0) * 2;
@@ -837,12 +845,27 @@ function effectiveStats() {
   };
 }
 
+function equipmentEffects() {
+  return Object.values(character.equipment).reduce((effects, item) => {
+    const special = itemStats(item).special;
+    if (special === '흡혈') effects.afterHeal += 8;
+    if (special === '탐욕') effects.goldRate += 0.25;
+    if (special === '성장') effects.expRate += 0.2;
+    if (special === '수호') effects.damageReduction += 4;
+    if (special === '치명') effects.attackBonus += 5;
+    if (special === '예지') effects.damageReduction += 2;
+    return effects;
+  }, { afterHeal: 0, goldRate: 1, expRate: 1, damageReduction: 0, attackBonus: 0 });
+}
+
 function itemBonusText(item) {
   const stats = itemStats(item);
   return [
     stats.attack ? `공격 +${stats.attack}` : '',
     stats.defense ? `방어 +${stats.defense}` : '',
-    stats.spirit ? `정신 +${stats.spirit}` : ''
+    stats.spirit ? `정신 +${stats.spirit}` : '',
+    stats.luck ? `행운 +${stats.luck}` : '',
+    stats.special ? `특수 ${stats.special}` : ''
   ].filter(Boolean).join(', ');
 }
 
@@ -992,6 +1015,8 @@ ${frontierMapText()}
 function nekoProfile() {
   const settings = currentSettings();
   const level = Math.max(1, Math.min(99, Number(settings.level) || 1));
+  const equipLuck = equipmentBonus().luck || 0;
+  const luck = Math.max(0, Math.min(99, Number(settings.luck) || 0)) + equipLuck + Math.floor(nekoMemory.level / 2);
   const ability = settings.ability || '길찾기와 명령어 해석';
   const role = settings.role || '길잡이';
   const risk = settings.risk || '균형';
@@ -1001,7 +1026,7 @@ function nekoProfile() {
   const growthRate = 1 + Math.min(0.7, level / 100) + Math.min(0.2, nekoMemory.level / 120) + (/전투|수련|성장/.test(ability) ? 0.15 : 0);
   const goldRate = 1 + Math.min(0.35, level / 180) + (/소문|탐지|상인/.test(ability) || role === '상인' ? 0.15 : 0);
   const autoDelay = risk === '공격' ? 1200 : /길찾기|명령어|예지/.test(ability) || role === '길잡이' ? 1500 : 1900;
-  return { level, ability, role, risk, combat, guard, growthRate, goldRate, autoDelay };
+  return { level, luck, ability, role, risk, combat, guard, growthRate, goldRate, autoDelay };
 }
 
 function saveGameState() {
@@ -1013,6 +1038,7 @@ function saveGameState() {
       visitedRooms: Array.from(visitedRooms).filter((name) => rooms[name]),
       resolvedEvents: Array.from(resolvedEvents).filter((name) => rooms[name]),
       autoMode: currentAutoMode(),
+      customItems,
       rogue: {
         active: rogue.active,
         depth: rogue.depth,
@@ -1072,6 +1098,11 @@ function loadGameState() {
     teamTrust = Object.fromEntries(Object.entries(saved.teamTrust)
       .filter(([name]) => names.includes(name))
       .map(([name, value]) => [name, Math.max(0, Math.min(99, Number(value) || 0))]));
+  }
+  if (saved.customItems && typeof saved.customItems === 'object') {
+    customItems = Object.fromEntries(Object.entries(saved.customItems).filter(([, stats]) => (
+      stats && ['무기', '방어구', '장신구'].includes(stats.slot)
+    )));
   }
   if (saved.rogue && typeof saved.rogue === 'object') {
     rogue.active = Boolean(saved.rogue.active);
@@ -1163,6 +1194,7 @@ function renderStatusPanel() {
     ...(team.length ? [''] : []),
     '[네코]',
     `레벨: ${neko.level}`,
+    `행운: ${neko.luck}`,
     `능력: ${neko.ability}`,
     `역할: ${neko.role} / 위험 ${neko.risk}`,
     `전투 보조: +${neko.combat}`,
@@ -1179,7 +1211,7 @@ function renderStatusPanel() {
     ...['무기', '방어구', '장신구'].map((slot) => `${slot}: +${character.upgrades[slot] || 0}`),
     '',
     '[보관 아이템]',
-    ...character.inventory.map((item, index) => `${index + 1}. ${item}`),
+    ...character.inventory.map((item, index) => `${index + 1}. ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}`),
     '',
     '[실시간 지도]',
     mapText()
@@ -1206,6 +1238,12 @@ function grantStoryReward(step) {
 
 function removeOneItem(name) {
   const index = character.inventory.findIndex((item) => item.startsWith(name));
+  if (index >= 0) character.inventory.splice(index, 1);
+  return index >= 0;
+}
+
+function removeExactItem(name) {
+  const index = character.inventory.indexOf(name);
   if (index >= 0) character.inventory.splice(index, 1);
   return index >= 0;
 }
@@ -1372,6 +1410,7 @@ function loadSettings() {
     risk: '균형',
     memoryMode: '요약 기억',
     level: '7',
+    luck: '7',
     ability: '길찾기와 명령어 해석',
     prompt: randomSettings.prompt[0]
   };
@@ -1392,6 +1431,7 @@ function makeRandomSettings() {
   fields.risk.value = pick(randomSettings.risk);
   fields.memoryMode.value = pick(randomSettings.memoryMode);
   fields.level.value = pick(randomSettings.level);
+  fields.luck.value = pick(randomSettings.luck);
   fields.ability.value = pick(randomSettings.ability);
   fields.prompt.value = pick(randomSettings.prompt);
   saveSettings();
@@ -1548,7 +1588,7 @@ function talkNpc(input = '') {
 }
 
 function showInventory() {
-  append(`\n[소지품]\n${character.inventory.map((item, index) => `${index + 1}. ${item}`).join('\n') || '비어 있음'}`);
+  append(`\n[소지품]\n${character.inventory.map((item, index) => `${index + 1}. ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}`).join('\n') || '비어 있음'}`);
 }
 
 function showScore() {
@@ -1559,6 +1599,48 @@ function showScore() {
 
 function showNekoMemory() {
   append(`\n[네코 지식]\n${nekoMemoryText()}`, 'neko');
+  showChoices();
+}
+
+function fusionIngredients(input = '') {
+  const named = character.inventory.filter((item, index, list) => (
+    list.indexOf(item) === index && input.includes(item)
+  ));
+  if (named.length >= 2) return named.slice(0, 3);
+  const nonPotion = character.inventory.filter((item) => !shopItems[item]?.heal);
+  return (nonPotion.length >= 2 ? nonPotion : character.inventory).slice(0, 3);
+}
+
+function forgeItem(input = '') {
+  const ingredients = fusionIngredients(input);
+  if (ingredients.length < 2) {
+    append('연성에는 보관 아이템이 최소 2개 필요합니다. 예) 연성');
+    showChoices();
+    return;
+  }
+
+  const neko = nekoProfile();
+  const roll = Math.random() + neko.luck / 120 + ingredients.length * 0.05;
+  const tier = roll >= 1.25 ? '전설' : roll >= 0.95 ? '희귀' : '기묘';
+  const special = pick(['흡혈', '탐욕', '성장', '수호', '치명', '예지']);
+  const slot = ingredients.map((item) => itemStats(item).slot).find(Boolean) || pick(['무기', '방어구', '장신구']);
+  const base = ingredients.reduce((sum, item) => sum + Math.max(1, equipmentScore(item)), character.level * 3 + neko.luck);
+  const power = Math.max(3, Math.round(base * ({ 기묘: 0.9, 희귀: 1.25, 전설: 1.7 }[tier] || 1) / 7));
+  const stats = {
+    slot,
+    attack: slot === '무기' ? power + 2 : Math.floor(power / 3),
+    defense: slot === '방어구' ? power + 2 : Math.floor(power / 3),
+    spirit: slot === '장신구' ? power + 2 : Math.floor(power / 3),
+    luck: Math.max(1, Math.floor(neko.luck / 12) + (tier === '전설' ? 5 : tier === '희귀' ? 3 : 1)),
+    special
+  };
+  const itemName = `${tier} ${special} ${slot} ${Date.now().toString(36).slice(-4)}`;
+  ingredients.forEach(removeExactItem);
+  customItems[itemName] = stats;
+  addItem(itemName);
+  rememberNeko('연성', `${ingredients.join('+')} => ${itemName}`, tier === '전설' ? 4 : tier === '희귀' ? 3 : 2);
+  commitProgress();
+  append(`\n[네코 연성]\n재료: ${ingredients.join(' + ')}\n행운 판정: ${neko.luck} / 결과 ${tier}\n완성: ${itemName} (${itemBonusText(itemName)})\n네코: 완전 안정적인 선택은 아니지만, 이런 도박수가 가끔 판을 뒤집어.`, 'neko');
   showChoices();
 }
 
@@ -1584,7 +1666,8 @@ function useItem(input = '') {
 }
 
 function equipItem(input = '') {
-  const itemName = Object.keys(equipmentCatalog).find((name) => input.includes(name));
+  const itemName = equipmentNames().find((name) => input.includes(name))
+    || character.inventory.find((item) => itemStats(item).slot && item.includes(input.trim()));
   if (!itemName) {
     append('착용할 장비를 입력하세요. 예) 착용 청동검');
     return;
@@ -1594,7 +1677,7 @@ function equipItem(input = '') {
     return;
   }
 
-  const slot = equipmentCatalog[itemName].slot;
+  const slot = itemStats(itemName).slot;
   const oldItem = character.equipment[slot];
   removeOneItem(itemName);
   if (oldItem) addItem(oldItem);
@@ -1607,7 +1690,7 @@ function equipItem(input = '') {
 function upgradeEquipment(input = '') {
   const slot = upgradeSlotFromInput(input);
   const item = character.equipment[slot];
-  if (!item || !equipmentCatalog[item]) {
+  if (!item || !itemStats(item).slot) {
     append(`${slot}에 강화할 장비가 없습니다.`);
     showChoices();
     return;
@@ -1638,14 +1721,15 @@ function hunt(input = '') {
   const monster = encounters.find((item) => input && item.name.includes(input.trim())) || pick(encounters);
   const neko = nekoProfile();
   const stats = effectiveStats();
+  const gearEffects = equipmentEffects();
   const allies = teamPower();
   const trait = monsterTraits[monster.trait] || {};
-  const attackPower = stats.attack + allies.attack + neko.combat;
+  const attackPower = stats.attack + allies.attack + neko.combat + gearEffects.attackBonus;
   const guardPower = stats.defense + allies.defense + neko.guard;
   const traitDamage = Math.max(0, (trait.damage || 0) - allies.scout);
-  const damage = Math.max(1, Math.ceil(monster.hp * 0.45) + traitDamage + rogueDamageBonus() - guardPower);
-  const expGain = Math.round(monster.exp * (trait.expRate || 1) * neko.growthRate);
-  const goldGain = Math.round(monster.gold * (trait.goldRate || 1) * neko.goldRate * rogueGoldRate());
+  const damage = Math.max(1, Math.ceil(monster.hp * 0.45) + traitDamage + rogueDamageBonus() - guardPower - gearEffects.damageReduction);
+  const expGain = Math.round(monster.exp * (trait.expRate || 1) * neko.growthRate * gearEffects.expRate);
+  const goldGain = Math.round(monster.gold * (trait.goldRate || 1) * neko.goldRate * rogueGoldRate() * gearEffects.goldRate);
   const beforeHp = character.hp;
   character.hp = Math.max(1, character.hp - damage);
   if (rogue.active && beforeHp <= damage) {
@@ -1669,6 +1753,7 @@ function hunt(input = '') {
     addItem(monster.bonusItem);
     append(`특별 전리품: ${monster.bonusItem}`, 'ally');
   }
+  if (gearEffects.afterHeal) healCharacter(gearEffects.afterHeal, '흡혈 장비', 'ally');
   recordRogueCombat(monster);
   rememberNeko('전투', `${roomName} ${monster.name}`, 2);
   autoLevelUp('전투 경험');
@@ -1717,7 +1802,8 @@ function fallbackNeko(question = '') {
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
   if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한평원, 자동목표 팀을 쓸 수 있어.';
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
-  if (/장비|착용|무기/.test(q)) return '장터에서 청동검, 가죽갑옷, 수련 부적을 살 수 있어. 산 다음 "착용 장비명", 더 키울 때는 "강화 무기"라고 해.';
+  if (/연성|조합|융합|합성|도박/.test(q)) return `보관함 아이템이 2개 이상이면 "연성"으로 새 장비를 만들 수 있어. 내 행운은 ${nekoProfile().luck}이라 결과가 조금 흔들려.`;
+  if (/장비|착용|무기/.test(q)) return '장터 장비를 사거나, 보관 아이템을 "연성"해서 특수능력 장비를 만들 수 있어. 착용은 "착용 장비명"이야.';
   if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
   if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 사건, 사냥, 회복, 원정, 원정종료, 구매 회복약, 착용 청동검, 강화 무기, 자동목표 무한평원, 이동 장소를 쓸 수 있어.';
   if (/회복|피|HP|hp|죽/.test(q)) return 'HP가 낮으면 "회복"이라고 해. 동료와 내가 먼저 돕고, 부족하면 회복약을 써. 장터에서는 "구매 회복약"도 가능해.';
@@ -1737,6 +1823,7 @@ function buildSystemInstruction() {
     `위험 성향: ${settings.risk}`,
     `학습 방식: ${settings.memoryMode}`,
     `레벨: ${settings.level}`,
+    `행운: ${settings.luck}`,
     `특수능력: ${settings.ability}`,
     `추가 설정: ${settings.prompt}`,
     `현재 장소: ${roomName} - ${rooms[roomName].desc}`,
@@ -1746,12 +1833,13 @@ function buildSystemInstruction() {
     `캐릭터: 레벨 ${character.level}, HP ${character.hp}/${character.hpMax}, MP ${character.mp}/${character.mpMax}, 공격 ${character.attack}, 방어 ${character.defense}, 정신 ${character.spirit}, EXP ${character.exp}/${character.expToLevel}, 돈 ${character.gold}`,
     `현재 임무: ${currentQuest().title} - ${currentQuest().goal}`,
     `소지품: ${character.inventory.join(', ')}`,
+    `연성 장비: ${Object.keys(customItems).join(', ') || '없음'}`,
     `무한원정: ${rogue.active ? `진행 중, 깊이 ${rogue.depth}, 유물 ${rogue.relics.join(', ') || '없음'}, 저주 ${rogue.curses.join(', ') || '없음'}` : `대기, 역대 최고 깊이 ${rogue.bestDepth}, 파편 ${rogue.fragments}`}`,
     `축적 지식: ${nekoMemoryText()}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '축적 지식과 최근 기억을 근거로 다음 행동을 더 똑똑하게 추천한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 연성, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -1816,6 +1904,11 @@ function storyChoice() {
 function bestAutoGearChoice() {
   if (character.storyStep < 8) return null;
   const desiredGear = ['무한전선 검', '고성검', '철검', '철갑옷', '사냥꾼 부적', '청동검', '가죽갑옷', '수련 부적', '광부의 곡괭이'];
+  const customReady = character.inventory.find((item) => itemStats(item).slot && isBetterEquipment(item));
+  if (customReady) return { label: `${customReady} 착용`, command: `착용 ${customReady}` };
+  if (character.inventory.filter((item) => !shopItems[item]?.heal).length >= 8) {
+    return { label: '네코 연성 도박수', command: '연성' };
+  }
   if (canShopHere()) {
     const equipReady = desiredGear.find((item) => {
       return hasItem(item) && isBetterEquipment(item);
@@ -1945,6 +2038,9 @@ function makeChoices() {
   const heal = character.hp < character.hpMax ? { label: 'HP 회복', command: '회복' } : null;
   const shop = canShopHere() ? { label: '회복약 구매', command: '구매 회복약' } : null;
   const upgrade = canShopHere() ? { label: '무기 강화', command: '강화 무기' } : null;
+  const fusion = character.inventory.filter((item) => !shopItems[item]?.heal).length >= 2
+    ? { label: '네코 아이템 연성', command: '연성' }
+    : null;
   const rogueChoice = character.storyStep >= 8
     ? { label: rogue.active ? '무한원정 상태' : '무한원정 시작', command: '원정' }
     : null;
@@ -1955,6 +2051,7 @@ function makeChoices() {
     rogueChoice,
     event,
     { label: '주변 조사', command: '조사' },
+    fusion,
     shop,
     combat,
     roomName === '수련장' ? { label: '수련하기', command: '수련' } : null,
@@ -1974,6 +2071,7 @@ function autoAlternatives() {
     eventChoice(),
     bestAutoTeamChoice(),
     bestAutoGearChoice(),
+    character.inventory.filter((item) => !shopItems[item]?.heal).length >= 2 ? { label: '네코 아이템 연성', command: '연성' } : null,
     { label: '주변 조사', command: '조사' },
     encountersForRoom(roomName).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null,
     roomName === '수련장' ? { label: '수련하기', command: '수련' } : null,
@@ -2238,7 +2336,7 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 원정\n예) 네코기억\n예) 자동목표 무한평원\n예) 강화 무기\n예) 이동 무한평원 05-05`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n연성/조합/융합    보관 아이템 2~3개를 네코가 도박수로 합성\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 연성\n예) 네코기억\n예) 자동목표 무한평원\n예) 강화 무기\n예) 이동 무한평원 05-05`);
 }
 
 function blueprint() {
@@ -2317,6 +2415,7 @@ async function runCommand(raw) {
   else if (['구매', '구입', '사', 'buy'].includes(command)) buyItem(body);
   else if (['착용', '장착', 'equip'].includes(command)) equipItem(body);
   else if (['강화', '업그레이드', 'upgrade'].includes(command)) upgradeEquipment(body);
+  else if (['연성', '조합', '융합', '합성', 'forge'].includes(command)) forgeItem(body);
   else if (['소지품', '소지', 'inventory'].includes(command)) showInventory();
   else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();
   else if (['네코기억', '기억', '학습'].includes(command)) showNekoMemory();

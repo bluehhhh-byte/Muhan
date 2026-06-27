@@ -37,7 +37,7 @@ const ids = [
   'gameConnect', 'gameDisconnect', 'gameSend', 'gameClear', 'gameEnter',
   'gameAuto', 'autoMode', 'autoScroll', 'geminiTestStatus', 'geminiModel', 'nekoGender',
   'nekoTone', 'nekoPersonality', 'nekoRole', 'nekoRisk', 'nekoMemoryMode',
-  'nekoLevel', 'nekoAbility', 'nekoPrompt', 'saveSettings',
+  'nekoLevel', 'nekoLuck', 'nekoAbility', 'nekoPrompt', 'saveSettings',
   'randomSettings', 'testGemini'
 ];
 const elements = Object.fromEntries(ids.map((id) => [id, makeElement(id)]));
@@ -50,6 +50,7 @@ elements.nekoRole.value = '길잡이';
 elements.nekoRisk.value = '균형';
 elements.nekoMemoryMode.value = '요약 기억';
 elements.nekoLevel.value = '7';
+elements.nekoLuck.value = '9';
 elements.nekoAbility.value = '길찾기';
 elements.nekoPrompt.value = '테스트';
 
@@ -217,10 +218,13 @@ async function submit(command) {
   const autoLog = screenText().slice(beforeAuto.length);
   if (!screenText().includes('[팀 신뢰]')) throw new Error('자동 사냥 실행 실패');
   if ((autoLog.match(/=> 사냥/g) || []).length > 1) throw new Error('자동 진행이 같은 방에서 사냥만 반복함');
-  if (!/=> (회복|팀|사건|조사|귓|강화|구매|수련)/.test(autoLog)) throw new Error('자동 진행 대체 행동 선택 실패');
+  if (!/=> (회복|팀|사건|조사|귓|강화|구매|수련|연성)/.test(autoLog)) throw new Error('자동 진행 대체 행동 선택 실패');
   await context.autoTick();
   if (elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('자동 진행 장소 2회 제한 이동 실패');
   if (!screenText().includes('장소 행동 2회 완료')) throw new Error('자동 진행 강제 이동 안내 실패');
+  await submit('연성');
+  if (!screenText().includes('[네코 연성]') || !screenText().includes('특수')) throw new Error('네코 아이템 연성 실패');
+  if (!/연성 [1-9]/.test(elements.statusPanel.textContent)) throw new Error('네코 연성 기억 누적 실패');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
