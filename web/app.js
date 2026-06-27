@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.21.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.22.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -342,8 +342,52 @@ function frontierEncounters(room = roomName) {
   return special?.type === 'boss' ? [special.monster].concat(encounters) : encounters;
 }
 
+function monsterLevelFor(room, monster) {
+  const coord = frontierCoord(room);
+  const roomOffset = {
+    '초보사냥터': 0,
+    '북문': 0,
+    '북문 밖 숲': 1,
+    '폐광 입구': 2
+  }[room] || 0;
+  const frontierOffset = coord ? Math.floor((coord.row + coord.col - 2) / 4) : 0;
+  const bossOffset = monster.trait === '우두머리' ? 2 : 0;
+  return Math.max(1, character.level + roomOffset + frontierOffset + bossOffset);
+}
+
+function scaleMonster(monster, room = roomName) {
+  const level = monsterLevelFor(room, monster);
+  const levelRate = 1 + (level - 1) * 0.18;
+  const overLevelRate = 1 + Math.max(0, level - character.level) * 0.08;
+  const expFloor = Math.round(expForLevel(character.level) * (0.16 + Math.max(0, level - character.level) * 0.03));
+  const goldFloor = 35 + level * 32;
+  const bonusItem = level >= 5 && (monster.trait === '우두머리' || level % 3 === 0)
+    ? `Lv.${level} ${monster.trait || '전투'} 전리품`
+    : '';
+  return {
+    ...monster,
+    level,
+    hp: Math.round(monster.hp * levelRate * overLevelRate),
+    exp: Math.max(Math.round(monster.exp * levelRate), expFloor),
+    gold: Math.max(Math.round(monster.gold * (1 + level * 0.08)), goldFloor),
+    bonusItem
+  };
+}
+
+function combatRoundText(monster, attackPower, guardPower, damage) {
+  const rounds = 3;
+  return Array.from({ length: rounds }, (_, index) => {
+    const hit = Math.max(1, Math.round((monster.hp / rounds) + attackPower * (0.18 + index * 0.04)));
+    const taken = index === rounds - 1
+      ? Math.max(0, damage - Math.floor(damage * 0.62))
+      : Math.max(0, Math.floor(damage * (index === 0 ? 0.3 : 0.32)));
+    const guardText = guardPower ? `방어 ${guardPower}` : '방어 없음';
+    return `${index + 1}턴: 피해 ${hit} 누적, 반격 ${taken} (${guardText})`;
+  }).join('\n');
+}
+
 function encountersForRoom(room = roomName) {
-  return roomEncounters[room] || frontierEncounters(room);
+  return (roomEncounters[room] || frontierEncounters(room)).map((monster) => scaleMonster(monster, room));
 }
 
 const chatter = [
@@ -956,7 +1000,7 @@ function nekoProfile() {
   const guard = Math.floor(level / 15) + Math.floor(memoryBonus / 2) + (/위험|예지|생존/.test(ability) || role === '수호자' || risk === '안전' ? 3 : 0);
   const growthRate = 1 + Math.min(0.7, level / 100) + Math.min(0.2, nekoMemory.level / 120) + (/전투|수련|성장/.test(ability) ? 0.15 : 0);
   const goldRate = 1 + Math.min(0.35, level / 180) + (/소문|탐지|상인/.test(ability) || role === '상인' ? 0.15 : 0);
-  const autoDelay = /길찾기|명령어|예지/.test(ability) || role === '길잡이' ? 3200 : risk === '공격' ? 3000 : 4200;
+  const autoDelay = risk === '공격' ? 1200 : /길찾기|명령어|예지/.test(ability) || role === '길잡이' ? 1500 : 1900;
   return { level, ability, role, risk, combat, guard, growthRate, goldRate, autoDelay };
 }
 
@@ -1611,7 +1655,7 @@ function hunt(input = '') {
   }
   character.exp += expGain;
   character.gold += goldGain;
-  append(`\n[전투]\n${monster.name}을(를) 공격했다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
+  append(`\n[전투]\n${monster.name} Lv.${monster.level}을(를) 공격했다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${combatRoundText(monster, attackPower, guardPower, damage)}\n총 피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
   if (team.length) {
     raiseTeamTrust(1);
     append(`[팀 신뢰] ${team.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
@@ -1620,6 +1664,10 @@ function hunt(input = '') {
   if (monster.item && !hasItem(monster.item)) {
     addItem(monster.item);
     append(`획득 물품: ${monster.item}`, 'ally');
+  }
+  if (monster.bonusItem && !hasItem(monster.bonusItem)) {
+    addItem(monster.bonusItem);
+    append(`특별 전리품: ${monster.bonusItem}`, 'ally');
   }
   recordRogueCombat(monster);
   rememberNeko('전투', `${roomName} ${monster.name}`, 2);
