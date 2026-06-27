@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.13.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.14.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -242,6 +242,18 @@ const story = [
   { title: '무한전선', goal: '무한평원 10-10의 감시자를 쓰러뜨려 다음 장의 깃발을 얻어라.', hint: '이동 무한평원 10-10 → 사냥 무한전선 감시자' },
   { title: '열린 대전', goal: '사냥, 수련, 장비, 팀업, 탐험을 반복해 더 깊은 지역을 준비하라.', hint: '자동목표 / 사냥 / 강화 / 팀교체 / 네코' }
 ];
+
+const storyRewards = {
+  2: { exp: 60, gold: 80, item: '현감의 동전' },
+  3: { exp: 100, gold: 90, item: '증거 주머니' },
+  4: { exp: 120, gold: 100, item: '수련 완주표' },
+  5: { exp: 120, gold: 120, item: '생명의나무 열매' },
+  8: { exp: 220, gold: 240, item: '평원 입장패' },
+  10: { exp: 240, gold: 260, item: '표지석 탁본' },
+  11: { exp: 280, gold: 300, item: '역참 보급권' },
+  12: { exp: 360, gold: 420, item: '검은 고성 열쇠' },
+  13: { exp: 500, gold: 600, item: '무한전선 깃발' }
+};
 
 const roomNpcs = {
   '중앙광장': ['전광판 관리인', '떠돌이 도우미'],
@@ -748,6 +760,16 @@ function addItem(item) {
   character.inventory.push(item);
 }
 
+function grantStoryReward(step) {
+  const reward = storyRewards[step];
+  if (!reward) return;
+  character.exp += reward.exp || 0;
+  character.gold += reward.gold || 0;
+  if (reward.item && !hasItem(reward.item)) addItem(reward.item);
+  append(`\n[임무 보상]\n경험 ${reward.exp || 0}, 돈 ${reward.gold || 0} 전${reward.item ? `, 물품 ${reward.item}` : ''}`, 'choice');
+  autoLevelUp('임무 보상');
+}
+
 function removeOneItem(name) {
   const index = character.inventory.findIndex((item) => item.startsWith(name));
   if (index >= 0) character.inventory.splice(index, 1);
@@ -875,6 +897,7 @@ function setStoryStep(step, text) {
   if (character.storyStep >= step) return;
   character.storyStep = Math.min(step, story.length - 1);
   append(`\n[임무 갱신]\n${currentQuest().title}\n${text || currentQuest().goal}`, 'choice');
+  grantStoryReward(character.storyStep);
 }
 
 function commitProgress() {

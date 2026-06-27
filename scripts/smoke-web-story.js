@@ -105,6 +105,7 @@ async function submit(command) {
   if (!elements.statusPanel.textContent.includes('[현감청]')) throw new Error('지도 현재 위치 갱신 실패');
   await submit('대화 현감');
   if (!elements.statusPanel.textContent.includes('발자국 조사')) throw new Error('현감 대화 이후 발자국 조사로 진행되지 않음');
+  if (!screenText().includes('[임무 보상]') || !screenText().includes('현감의 동전')) throw new Error('임무 보상 지급 실패');
   await submit('1');
   await submit('1');
   await submit('1');
