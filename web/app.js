@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.7';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.8';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -362,6 +362,19 @@ function teamLabel() {
   return team.length ? team.map((name) => `${name}(${allyRole(name).label})`).join(', ') : '없음';
 }
 
+function mapText() {
+  const here = (name) => (roomName === name ? `[${name}]` : name);
+  return `${here('현감청')}        ${here('수련장')}
+    \\          /
+     ${here('중앙광장')} -- ${here('주막')} -- ${here('장터')}
+        |       \\
+      ${here('북문')}    ${here('생명의나무')}
+     /   \\        |
+${here('초보사냥터')}  ${here('북문 밖 숲')}
+              |
+          ${here('폐광 입구')}`;
+}
+
 function nekoProfile() {
   const settings = currentSettings();
   const level = Math.max(1, Math.min(99, Number(settings.level) || 1));
@@ -471,7 +484,10 @@ function renderStatusPanel() {
     ...Object.entries(character.equipment).map(([slot, item]) => `${slot}: ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}`),
     '',
     '[보관 아이템]',
-    ...character.inventory.map((item, index) => `${index + 1}. ${item}`)
+    ...character.inventory.map((item, index) => `${index + 1}. ${item}`),
+    '',
+    '[실시간 지도]',
+    mapText()
   ].join('\n');
 }
 
@@ -684,8 +700,7 @@ function look() {
 }
 
 function showMap() {
-  const here = (name) => (roomName === name ? `[${name}]` : name);
-  append(`\n[지도]\n${here('현감청')}        ${here('수련장')}\n    \\          /\n     ${here('중앙광장')} -- ${here('주막')} -- ${here('장터')}\n        |       \\\n      ${here('북문')}    ${here('생명의나무')}\n     /   \\        |\n${here('초보사냥터')}  ${here('북문 밖 숲')}\n              |\n          ${here('폐광 입구')}`, 'room');
+  append(`\n[지도]\n${mapText()}`, 'room');
   showChoices();
 }
 

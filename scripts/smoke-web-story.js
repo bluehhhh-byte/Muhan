@@ -88,6 +88,7 @@ async function submit(command) {
   elements.gameConnect.listeners.click();
   await submit('지도');
   if (!screenText().includes('[지도]') || !screenText().includes('[중앙광장]')) throw new Error('지도 표시 실패');
+  if (!elements.statusPanel.textContent.includes('[실시간 지도]') || !elements.statusPanel.textContent.includes('[중앙광장]')) throw new Error('상태창 실시간 지도 표시 실패');
   await submit('팀 검객루안');
   if (!elements.statusPanel.textContent.includes('팀: 검객루안')) throw new Error('팀 영입 실패');
   await submit('팀교체 검객루안 달빛상인');
@@ -98,6 +99,7 @@ async function submit(command) {
   if (!elements.statusPanel.textContent.includes('첫 임무')) throw new Error('환영 이후 첫 임무로 진행되지 않음');
   await submit('1');
   if (!elements.statusPanel.textContent.includes('위치: 현감청')) throw new Error('1번 선택으로 현감청 이동 실패');
+  if (!elements.statusPanel.textContent.includes('[현감청]')) throw new Error('지도 현재 위치 갱신 실패');
   await submit('대화 현감');
   if (!elements.statusPanel.textContent.includes('발자국 조사')) throw new Error('현감 대화 이후 발자국 조사로 진행되지 않음');
   await submit('1');
