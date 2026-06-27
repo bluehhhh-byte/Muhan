@@ -55,8 +55,15 @@ elements.nekoAbility.value = '길찾기';
 elements.nekoPrompt.value = '테스트';
 
 const storage = {};
+let seed = 7;
+const seededMath = Object.create(Math);
+seededMath.random = () => {
+  seed = (seed * 16807) % 2147483647;
+  return (seed - 1) / 2147483646;
+};
 const context = {
   console,
+  Math: seededMath,
   setTimeout,
   clearTimeout,
   localStorage: {
@@ -93,6 +100,10 @@ async function submit(command) {
 
 (async () => {
   elements.gameConnect.listeners.click();
+  await submit('유저');
+  if (!screenText().includes('[접속자 200명]') || !screenText().includes('(결혼)')) throw new Error('AI 유저 200명/능력 표시 실패');
+  await submit('사회 결혼');
+  if (!screenText().includes('[AI 사회]') || !screenText().includes('현재 접속자: 201명')) throw new Error('AI 사회 결혼/증가 사건 실패');
   await submit('지도');
   if (!screenText().includes('[지도]') || !screenText().includes('[중앙광장]')) throw new Error('지도 표시 실패');
   if (!screenText().includes('표식: S 안전 / $ 상점 / H 회복 / B 보스')) throw new Error('무한평원 지도 표식 실패');
@@ -226,6 +237,8 @@ async function submit(command) {
   await submit('연성');
   if (!screenText().includes('[네코 연성]') || !screenText().includes('특수')) throw new Error('네코 아이템 연성 실패');
   if (!/연성 [1-9]/.test(elements.statusPanel.textContent)) throw new Error('네코 연성 기억 누적 실패');
+  await submit('사회 살해');
+  if (!screenText().includes('즉시 체포') || !screenText().includes('현재 접속자: 199명')) throw new Error('AI 사회 범죄/체포 사건 실패');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

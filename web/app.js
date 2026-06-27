@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.25.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.26.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -38,7 +38,7 @@ const fields = {
   prompt: document.getElementById('nekoPrompt')
 };
 
-const names = [
+let names = [
   '검객루안', '달빛상인', '하늘도사', '백야검', '연화술사', '청풍객', '비류', '묵향', '서리궁수', '단목',
   '초롱도적', '은비', '무영', '해월', '자운', '흑린', '소하', '강철비', '운랑', '나린',
   '마루', '도윤', '초아', '류하', '태산', '진서', '별하', '유겸', '아라', '호연',
@@ -50,6 +50,61 @@ const names = [
   '적월', '소금장수', '산들', '태극', '여울', '매화', '비호', '검은별', '푸른달', '나그네',
   '도깨비불', '호수', '하늬', '은도끼', '불새', '그림자', '찬솔', '담쟁이', '무명검', '파천'
 ];
+
+const aiAbilityCatalog = ['결혼', '살해', '체포', '약탈', '중재', '치유', '상단', '소문', '보호', '스승'];
+const generatedUserWords = ['가람', '누리', '다래', '로하', '바림', '새온', '아린', '여명', '이솔', '찬별', '타래', '하랑', '휘온', '비설', '연담', '초린'];
+let aiBirthSeq = 1;
+
+function hashName(name) {
+  return Array.from(name).reduce((hash, char) => hash + char.charCodeAt(0), 0);
+}
+
+function aiAbility(name) {
+  return aiAbilityCatalog[hashName(name) % aiAbilityCatalog.length];
+}
+
+function aiUserLabel(name) {
+  return `${name}(${aiAbility(name)})`;
+}
+
+function generatedUserName(index) {
+  return `${generatedUserWords[index % generatedUserWords.length]}${Math.floor(index / generatedUserWords.length) + 1}`;
+}
+
+function ensureAiUsers(target = 200) {
+  let index = 0;
+  while (names.length < target) {
+    const name = generatedUserName(index);
+    if (!names.includes(name)) names.push(name);
+    index += 1;
+  }
+}
+
+function cleanAiUsers(list) {
+  return list.filter((name, index, source) => (
+    typeof name === 'string' && name.trim() && source.indexOf(name) === index
+  )).slice(0, 300);
+}
+
+function addAiUser(prefix = '새싹') {
+  let name = `${prefix}${aiBirthSeq}`;
+  while (names.includes(name)) {
+    aiBirthSeq += 1;
+    name = `${prefix}${aiBirthSeq}`;
+  }
+  aiBirthSeq += 1;
+  names.push(name);
+  return name;
+}
+
+function removeAiUser(name) {
+  const index = names.indexOf(name);
+  if (index < 0 || names.length <= 1) return false;
+  names.splice(index, 1);
+  team = team.filter((member) => member !== name);
+  delete teamTrust[name];
+  return true;
+}
 
 const rooms = {
   '중앙광장': { exits: ['북문', '주막', '수련장', '현감청', '생명의나무'], desc: '푸른 전광판과 오래된 향로가 있는 시작 광장이다.' },
@@ -1077,6 +1132,8 @@ function saveGameState() {
       roomName,
       team,
       teamTrust,
+      aiUsers: names,
+      aiBirthSeq,
       visitedRooms: Array.from(visitedRooms).filter((name) => rooms[name]),
       resolvedEvents: Array.from(resolvedEvents).filter((name) => rooms[name]),
       autoMode: currentAutoMode(),
@@ -1133,6 +1190,9 @@ function loadGameState() {
     resolvedEvents = new Set(saved.resolvedEvents.filter((name) => rooms[name]));
   }
   if (autoModeEl && autoModes[saved.autoMode]) autoModeEl.value = saved.autoMode;
+  if (Array.isArray(saved.aiUsers)) names = cleanAiUsers(saved.aiUsers);
+  if (!names.length) ensureAiUsers(200);
+  aiBirthSeq = Math.max(1, Number(saved.aiBirthSeq) || aiBirthSeq);
   if (Array.isArray(saved.team)) {
     team = saved.team.filter((name, index, list) => names.includes(name) && list.indexOf(name) === index).slice(0, 4);
   }
@@ -1211,6 +1271,7 @@ function renderStatusPanel() {
     `위치: ${roomName}`,
     `방문: ${visitedRooms.size}/${Object.keys(rooms).length}`,
     `사건: ${resolvedEvents.size}/${Object.keys(rooms).length}`,
+    `AI 유저: ${names.length}명`,
     ...(roomZoneText() ? [`지역: ${roomZoneText()}`] : []),
     `팀: ${teamLabel()}`,
     `자동 목표: ${autoModes[currentAutoMode()]}`,
@@ -1231,7 +1292,7 @@ function renderStatusPanel() {
     '',
     ...(team.length ? [
       '[팀 신뢰]',
-      ...team.map((name) => `${name}: ${trustFor(name)} / ${allyRole(name).label}`)
+      ...team.map((name) => `${name}: ${trustFor(name)} / ${allyRole(name).label} / ${aiAbility(name)}`)
     ] : []),
     ...(team.length ? [''] : []),
     '[네코]',
@@ -1492,17 +1553,19 @@ function setConnected(value) {
 }
 
 function roomUsers() {
+  if (!names.length) return [];
   const offset = Object.keys(rooms).indexOf(roomName) * 13;
   return Array.from({ length: 12 }, (_, index) => names[(offset + index) % names.length]);
 }
 
 function findUser(query) {
+  if (!query.trim()) return '';
   return names.find((name) => name === query) || names.find((name) => name.includes(query));
 }
 
 function look() {
   const room = rooms[roomName];
-  append(`\n[${roomName}]\n${room.desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}${frontierCoord(roomName) ? `\n원정 노드: ${rogueNodeType()}` : ''}\n출구: ${room.exits.join(', ')}\n고정 NPC: ${(roomNpcs[roomName] || []).join(', ') || '없음'}\n주변 유저: ${roomUsers().join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
+  append(`\n[${roomName}]\n${room.desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}${frontierCoord(roomName) ? `\n원정 노드: ${rogueNodeType()}` : ''}\n출구: ${room.exits.join(', ')}\n고정 NPC: ${(roomNpcs[roomName] || []).join(', ') || '없음'}\n주변 유저: ${roomUsers().map(aiUserLabel).join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
   showChoices();
 }
 
@@ -1851,7 +1914,7 @@ function fallbackNeko(question = '') {
     : '무한평원에서 "원정"을 입력하면 로그라이크식 무한원정을 시작해. 유물은 강해지고, 깊이 5마다 저주가 붙어.';
   if (/지도|맵|map/.test(q)) return `지도는 "지도"라고 입력하면 볼 수 있어. 현재 위치는 ${roomName}이야.`;
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
-  if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
+  if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 해고는 "팀해고 이름", 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
   if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한평원, 자동목표 팀을 쓸 수 있어.';
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/연성|조합|융합|합성|도박/.test(q)) return `보관함 아이템이 2개 이상이면 "연성"으로 새 장비를 만들 수 있어. 내 행운은 ${nekoProfile().luck}이라 결과가 조금 흔들려.`;
@@ -1859,7 +1922,7 @@ function fallbackNeko(question = '') {
   if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
   if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 사건, 사냥, 회복, 원정, 원정종료, 구매 회복약, 착용 청동검, 강화 무기, 자동목표 무한평원, 이동 장소를 쓸 수 있어.';
   if (/회복|피|HP|hp|죽/.test(q)) return 'HP가 낮으면 "회복"이라고 해. 동료와 내가 먼저 돕고, 부족하면 회복약을 써. 장터에서는 "구매 회복약"도 가능해.';
-  if (/사람|유저|누구/.test(q)) return `가상 유저 100명이 접속 중이야. 이 방에는 ${roomUsers().slice(0, 6).join(', ')} 등이 있어.`;
+  if (/사람|유저|누구/.test(q)) return `가상 유저 ${names.length}명이 접속 중이야. 이 방에는 ${roomUsers().slice(0, 6).map(aiUserLabel).join(', ')} 등이 있어.`;
   if (/사냥|전투|초보/.test(q)) return '처음이면 수련장으로 가고, 팀을 만든 뒤 북문을 지나 초보사냥터로 가면 안전해.';
   return 'Gemini 서버 연결이 안 되면 기본 네코로 안내할게. 지금은 주변을 살피고 팀을 모으자.';
 }
@@ -1880,7 +1943,7 @@ function buildSystemInstruction() {
     `추가 설정: ${settings.prompt}`,
     `현재 장소: ${roomName} - ${rooms[roomName].desc}`,
     `출구: ${rooms[roomName].exits.join(', ')}`,
-    `주변 유저: ${roomUsers().join(', ')}`,
+    `주변 유저: ${roomUsers().map(aiUserLabel).join(', ')}`,
     `현재 팀: ${team.length ? team.join(', ') : '없음'}`,
     `캐릭터: 레벨 ${character.level}, HP ${character.hp}/${character.hpMax}, MP ${character.mp}/${character.mpMax}, 공격 ${character.attack}, 방어 ${character.defense}, 정신 ${character.spirit}, EXP ${character.exp}/${character.expToLevel}, 돈 ${character.gold}`,
     `현재 임무: ${currentQuest().title} - ${currentQuest().goal}`,
@@ -1891,7 +1954,7 @@ function buildSystemInstruction() {
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '축적 지식과 최근 기억을 근거로 다음 행동을 더 똑똑하게 추천한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 연성, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 연성, 사회, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -2286,8 +2349,69 @@ async function testGemini() {
   }
 }
 
+function pickAiUserByAbility(ability, except = []) {
+  return names.find((name) => aiAbility(name) === ability && !except.includes(name));
+}
+
+function aiSocietyEvent(requestedAbility = '') {
+  if (names.length < 2) return;
+  const ability = aiAbilityCatalog.includes(requestedAbility.trim()) ? requestedAbility.trim() : '';
+  const actor = ability ? pickAiUserByAbility(ability) || pick(names) : pick(names);
+  const power = ability || aiAbility(actor);
+  const target = pick(names.filter((name) => name !== actor));
+  let text = '';
+
+  if (power === '결혼') {
+    const child = addAiUser();
+    const leftTeam = team.includes(actor);
+    if (leftTeam) {
+      team = team.filter((member) => member !== actor);
+      delete teamTrust[actor];
+    }
+    text = `${actor}와 ${target}이(가) 결혼했다. ${leftTeam ? `${actor}은(는) 파티를 떠났다. ` : ''}아이 ${child}이(가) 새로 접속했다.`;
+  } else if (power === '살해') {
+    removeAiUser(target);
+    const arrestor = pickAiUserByAbility('체포', [actor, target]);
+    if (arrestor) removeAiUser(actor);
+    text = `${actor}이(가) ${target}을(를) 살해했다.${arrestor ? ` ${arrestor}이(가) 즉시 체포해 ${actor}은(는) 접속자 명단에서 사라졌다.` : ''}`;
+  } else if (power === '약탈') {
+    const arrestor = pickAiUserByAbility('체포', [actor, target]);
+    if (arrestor) removeAiUser(actor);
+    if (team.includes(target)) teamTrust[target] = Math.max(0, trustFor(target) - 3);
+    text = `${actor}이(가) ${target}의 짐을 약탈했다.${arrestor ? ` ${arrestor}이(가) 체포했다.` : ' 아직 붙잡히지 않았다.'}`;
+  } else if (power === '체포') {
+    const criminal = names.find((name) => ['살해', '약탈'].includes(aiAbility(name)) && name !== actor);
+    if (criminal) removeAiUser(criminal);
+    text = criminal ? `${actor}이(가) 위험 유저 ${criminal}을(를) 체포했다.` : `${actor}이(가) 광장 순찰을 돌았다.`;
+  } else if (power === '중재') {
+    if (team.length) raiseTeamTrust(1);
+    text = `${actor}이(가) ${target}와 말다툼을 중재했다.${team.length ? ' 팀 신뢰가 조금 올랐다.' : ''}`;
+  } else if (power === '치유') {
+    const before = character.hp;
+    character.hp = Math.min(character.hpMax, character.hp + 6);
+    text = `${actor}이(가) ${target}을(를) 치료했다.${character.hp > before ? ' 당신도 작은 회복을 받았다.' : ''}`;
+  } else if (power === '상단') {
+    character.gold += 15;
+    text = `${actor}의 상단이 ${target}와 거래했다. 통행세 일부로 15전을 받았다.`;
+  } else if (power === '소문') {
+    text = `${actor}이(가) ${target}에게 새 소문을 퍼뜨렸다. 네코가 그 흐름을 기억했다.`;
+    rememberNeko('대화', `${actor} 소문`, 1);
+  } else if (power === '보호') {
+    if (team.includes(target)) teamTrust[target] = Math.min(99, trustFor(target) + 2);
+    text = `${actor}이(가) ${target}을(를) 보호했다.`;
+  } else {
+    character.exp += 20;
+    text = `${actor}이(가) ${target}에게 요령을 가르쳤다. 경험 20을 얻었다.`;
+    autoLevelUp('AI 스승');
+  }
+
+  append(`\n[AI 사회]\n${text}\n현재 접속자: ${names.length}명`, 'ally');
+  commitProgress();
+  renderStatusPanel();
+}
+
 function listUsers() {
-  append(`\n[접속자 100명]\n${names.map((name, index) => `${String(index + 1).padStart(3, '0')} ${name}`).join('\n')}`);
+  append(`\n[접속자 ${names.length}명]\n${names.map((name, index) => `${String(index + 1).padStart(3, '0')} ${aiUserLabel(name)}`).join('\n')}`);
 }
 
 function say(message) {
@@ -2387,8 +2511,19 @@ function clearTeam() {
   append('팀을 해산했습니다.');
 }
 
+function dismissTeamMember(input = '') {
+  const name = findUser(input.trim());
+  if (!name || !team.includes(name)) {
+    append(`해고할 팀원을 입력하세요. 현재 팀: ${team.length ? team.join(', ') : '없음'}`);
+    return;
+  }
+  team = team.filter((member) => member !== name);
+  commitProgress();
+  append(`${name}을(를) 팀에서 해고했습니다.`);
+}
+
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n연성/조합/융합    보관 아이템 2~3개를 네코가 도박수로 합성\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 연성\n예) 네코기억\n예) 자동목표 무한평원\n예) 강화 무기\n예) 이동 무한평원 05-05`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n연성/조합/융합    보관 아이템 2~3개를 네코가 도박수로 합성\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 사회 결혼\n예) 팀해고 검객루안\n예) 자동목표 무한평원\n예) 이동 무한평원 05-05`);
 }
 
 function blueprint() {
@@ -2397,6 +2532,10 @@ function blueprint() {
 
 function ambientChat() {
   if (!connected) return;
+  if (Math.random() > 0.82) {
+    aiSocietyEvent();
+    return;
+  }
   const user = team.length && Math.random() > 0.55 ? pick(team) : pick(roomUsers());
   lastSpeaker = user;
   const lines = team.includes(user) ? teamChatter : chatter.concat(roomChatter[roomName] || []);
@@ -2409,7 +2548,7 @@ function connect() {
   setConnected(true);
   commitProgress();
   setStatus('입장 완료', 'online');
-  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'} / 목표 ${autoModes[currentAutoMode()]}\n무한원정 ${rogue.active ? `깊이 ${rogue.depth}` : '대기'} / AI 유저 100명`);
+  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'} / 목표 ${autoModes[currentAutoMode()]}\n무한원정 ${rogue.active ? `깊이 ${rogue.depth}` : '대기'} / AI 유저 ${names.length}명`);
   clearScreen();
   append(`무한대전에 입장했습니다. 이어하기: ${roomName} / ${currentQuest().title}`);
   append('검은 고양이 네코가 조용히 옆에 앉습니다.');
@@ -2468,6 +2607,7 @@ async function runCommand(raw) {
   else if (['착용', '장착', 'equip'].includes(command)) equipItem(body);
   else if (['강화', '업그레이드', 'upgrade'].includes(command)) upgradeEquipment(body);
   else if (['연성', '조합', '융합', '합성', 'forge'].includes(command)) forgeItem(body);
+  else if (['사회', '사건사회', 'social'].includes(command)) aiSocietyEvent(body);
   else if (['소지품', '소지', 'inventory'].includes(command)) showInventory();
   else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();
   else if (['네코기억', '기억', '학습'].includes(command)) showNekoMemory();
@@ -2485,6 +2625,7 @@ async function runCommand(raw) {
   else if (['귓', '귓속말', 'tell'].includes(command)) whisper(body);
   else if (['이동', '가', 'move'].includes(command)) move(body);
   else if (['팀교체', '파티교체', '교체'].includes(command)) replaceTeamMember(body);
+  else if (['팀해고', '파티해고', '해고', '방출'].includes(command)) dismissTeamMember(body);
   else if (['팀', '파티'].includes(command) && body) teamUp(body);
   else if (['팀', '파티'].includes(command)) append(`현재 팀: ${team.length ? team.join(', ') : '없음'}`);
   else if (['팀해산', '파티해산'].includes(command)) clearTeam();
@@ -2542,12 +2683,13 @@ window.addEventListener('beforeunload', () => {
   window.clearInterval(tickTimer);
 });
 
+ensureAiUsers(200);
 loadSettings();
 loadGameState();
 setConnected(false);
 renderStatusPanel();
 setStatus('입장 대기', '');
-setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 꺼짐 / 목표 ${autoModes[currentAutoMode()]}\n무한원정 ${rogue.active ? `깊이 ${rogue.depth}` : '대기'} / AI 유저 100명`);
+setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 꺼짐 / 목표 ${autoModes[currentAutoMode()]}\n무한원정 ${rogue.active ? `깊이 ${rogue.depth}` : '대기'} / AI 유저 ${names.length}명`);
 append('무한대전 PC통신 접속 대기');
 append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 자동 진행');
 append('Gemini 키는 Vercel 환경변수 GEMINI_API_KEY를 사용합니다.');
