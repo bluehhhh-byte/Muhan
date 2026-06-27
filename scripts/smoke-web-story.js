@@ -156,10 +156,16 @@ async function submit(command) {
   if (!screenText().includes('[01-01S]') || !screenText().includes('10-10B')) throw new Error('무한평원 100구역 지도 표시 실패');
   await submit('조사');
   if (!screenText().includes('평원')) throw new Error('무한평원 조우 생성 실패');
-  await submit('자동목표 탐험');
-  if (!elements.statusPanel.textContent.includes('자동 목표: 탐험 우선')) throw new Error('자동 목표 변경 실패');
+  await submit('자동목표 사냥');
+  if (!elements.statusPanel.textContent.includes('자동 목표: 사냥 우선')) throw new Error('자동 목표 변경 실패');
   await submit('자동');
   if (!elements.statusPanel.textContent.includes('자동 진행: 켜짐')) throw new Error('자동 진행 상태 표시 실패');
+  await context.autoTick();
+  await context.autoTick();
+  if (!screenText().includes('[팀 신뢰]')) throw new Error('자동 사냥 실행 실패');
+  await context.autoTick();
+  if (elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('자동 진행 장소 2회 제한 이동 실패');
+  if (!screenText().includes('장소 행동 2회 완료')) throw new Error('자동 진행 강제 이동 안내 실패');
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

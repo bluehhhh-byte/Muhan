@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.14.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.15.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -395,6 +395,7 @@ let tickTimer = null;
 let autoTimer = null;
 let autoProgress = false;
 let autoBusy = false;
+let autoRoomActions = 0;
 let lastSpeaker = names[0];
 let nekoInteractionId = null;
 let choiceSlots = [];
@@ -1368,6 +1369,23 @@ function bestAutoExploreChoice() {
   return nextRoom ? { label: `${nextRoom} 탐험`, command: `이동 ${nextRoom}` } : null;
 }
 
+function bestAutoMoveChoice() {
+  const storyPlan = storyChoice();
+  if (storyPlan.command.startsWith('이동 ')) return storyPlan;
+  const explorePlan = bestAutoExploreChoice();
+  if (explorePlan?.command.startsWith('이동 ')) return explorePlan;
+  const exits = rooms[roomName].exits || [];
+  if (!exits.length) return null;
+  const coord = frontierCoord(roomName);
+  const nextRoom = coord
+    ? exits.find((exit) => {
+      const next = frontierCoord(exit);
+      return next && next.row + next.col > coord.row + coord.col;
+    }) || exits.find((exit) => frontierCoord(exit)) || exits[0]
+    : exits[0];
+  return { label: `${nextRoom}(으)로 이동`, command: `이동 ${nextRoom}` };
+}
+
 function makeChoices() {
   const room = rooms[roomName];
   const candidate = roomUsers().find((name) => !team.includes(name)) || roomUsers()[0];
@@ -1434,12 +1452,15 @@ function setAutoButton() {
 
 async function autoTick() {
   if (!connected || !autoProgress || autoBusy) return;
-  const choice = bestAutoChoice();
+  const forcedMove = autoRoomActions >= 2 ? bestAutoMoveChoice() : null;
+  const choice = forcedMove || bestAutoChoice();
   if (!choice) return;
   autoBusy = true;
-  append(`\n[자동 진행]\n네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
+  const beforeRoom = roomName;
+  append(`\n[자동 진행]\n${forcedMove ? '장소 행동 2회 완료. ' : ''}네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
   try {
     await runCommand(choice.command);
+    autoRoomActions = choice.command.startsWith('이동 ') || roomName !== beforeRoom ? 0 : autoRoomActions + 1;
   } finally {
     autoBusy = false;
   }
@@ -1452,6 +1473,7 @@ function setAutoProgress(value) {
     autoTimer = null;
   }
   if (autoProgress && connected) {
+    autoRoomActions = 0;
     autoTimer = window.setInterval(autoTick, nekoProfile().autoDelay);
     appendNeko('자동 진행을 시작할게. 위험하면 언제든 다시 눌러서 멈춰.');
   } else if (connected) {
@@ -1555,6 +1577,7 @@ function move(destination) {
   }
 
   roomName = target;
+  autoRoomActions = 0;
   commitProgress();
   append(`${roomName}(으)로 이동했다.`);
   if (team.length) append(`${team.join(', ')}: 같이 이동했어.`);
