@@ -35,12 +35,13 @@ function makeElement(id = '') {
 const ids = [
   'status', 'diagnostics', 'gameScreen', 'statusPanel', 'gameCommand', 'gameForm',
   'gameConnect', 'gameDisconnect', 'gameSend', 'gameClear', 'gameEnter',
-  'checkStatus', 'gameAuto', 'autoScroll', 'geminiTestStatus', 'geminiModel', 'nekoGender',
+  'checkStatus', 'gameAuto', 'autoMode', 'autoScroll', 'geminiTestStatus', 'geminiModel', 'nekoGender',
   'nekoTone', 'nekoLevel', 'nekoAbility', 'nekoPrompt', 'saveSettings',
   'randomSettings', 'testGemini'
 ];
 const elements = Object.fromEntries(ids.map((id) => [id, makeElement(id)]));
 elements.geminiModel.value = 'gemini-3.1-flash-lite';
+elements.autoMode.value = 'story';
 elements.nekoGender.value = '검은 고양이';
 elements.nekoTone.value = '짧게';
 elements.nekoLevel.value = '7';
@@ -88,7 +89,9 @@ async function submit(command) {
   elements.gameConnect.listeners.click();
   await submit('지도');
   if (!screenText().includes('[지도]') || !screenText().includes('[중앙광장]')) throw new Error('지도 표시 실패');
+  if (!screenText().includes('표식: S 안전 / $ 상점 / H 회복 / B 보스')) throw new Error('무한평원 지도 표식 실패');
   if (!elements.statusPanel.textContent.includes('[실시간 지도]') || !elements.statusPanel.textContent.includes('[중앙광장]')) throw new Error('상태창 실시간 지도 표시 실패');
+  if (!elements.statusPanel.textContent.includes('자동 목표: 스토리 우선')) throw new Error('자동 목표 기본값 표시 실패');
   await submit('팀 검객루안');
   if (!elements.statusPanel.textContent.includes('팀: 검객루안')) throw new Error('팀 영입 실패');
   await submit('팀교체 검객루안 달빛상인');
@@ -118,6 +121,7 @@ async function submit(command) {
   await submit('회복');
   if (!screenText().includes('HP')) throw new Error('회복 명령 응답이 없음');
   await submit('이동 생명의나무');
+  await submit('대화 안내자');
   await submit('이동 중앙광장');
   await submit('이동 주막');
   await submit('이동 장터');
@@ -131,16 +135,24 @@ async function submit(command) {
   await submit('이동 주막');
   await submit('이동 중앙광장');
   await submit('이동 북문');
+  await submit('조사');
   await submit('이동 북문 밖 숲');
+  await submit('조사');
   await submit('사냥');
   if (!screenText().includes('특성:')) throw new Error('몬스터 특성 전투 로그가 없음');
   await submit('이동 폐광 입구');
+  await submit('사냥 폐광 우두머리');
+  if (!elements.statusPanel.textContent.includes('평원 진입')) throw new Error('폐광 이후 평원 진입 임무 실패');
   await submit('이동 무한평원 01-01');
+  await submit('조사');
+  if (!elements.statusPanel.textContent.includes('표지석 조사')) throw new Error('평원 진입 이후 표지석 조사 임무 실패');
   if (!elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('확장 지도 진입 실패');
   await submit('지도');
-  if (!screenText().includes('[01-01]') || !screenText().includes('10-10')) throw new Error('무한평원 100구역 지도 표시 실패');
+  if (!screenText().includes('[01-01S]') || !screenText().includes('10-10B')) throw new Error('무한평원 100구역 지도 표시 실패');
   await submit('조사');
   if (!screenText().includes('평원')) throw new Error('무한평원 조우 생성 실패');
+  await submit('자동목표 탐험');
+  if (!elements.statusPanel.textContent.includes('자동 목표: 탐험 우선')) throw new Error('자동 목표 변경 실패');
   await submit('자동');
   if (!elements.statusPanel.textContent.includes('자동 진행: 켜짐')) throw new Error('자동 진행 상태 표시 실패');
 })().catch((error) => {

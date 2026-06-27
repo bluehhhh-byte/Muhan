@@ -24,7 +24,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -48,6 +49,14 @@ button:disabled,
 input:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+select {
+  min-height: 34px;
+  padding: 5px 8px;
+  color: var(--white);
+  background: var(--blue);
+  border: 1px solid var(--white);
 }
 
 .terminal-shell {
@@ -163,7 +172,7 @@ input:disabled {
 
 .menu {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 6px;
   margin-top: 10px;
 }

@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.10.9';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.11.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -20,6 +20,7 @@ const clearBtn = document.getElementById('gameClear');
 const nekoBtn = document.getElementById('gameEnter');
 const checkStatusBtn = document.getElementById('checkStatus');
 const autoBtn = document.getElementById('gameAuto');
+const autoModeEl = document.getElementById('autoMode');
 const autoScrollEl = document.getElementById('autoScroll');
 const geminiStatusEl = document.getElementById('geminiTestStatus');
 
@@ -59,6 +60,49 @@ const rooms = {
 };
 
 const FRONTIER_SIZE = 10;
+const autoModes = {
+  story: '스토리 우선',
+  hunt: '사냥 우선',
+  gear: '장비 우선',
+  safe: '안전 우선',
+  explore: '탐험 우선',
+  team: '팀 우선'
+};
+const frontierRegions = [
+  { row: 1, name: '초입초원', risk: '낮음', note: '폐광의 먼지가 풀밭 위로 옅게 내려앉았다.' },
+  { row: 2, name: '표지석 벌판', risk: '낮음', note: '낡은 표지석이 줄지어 서 있어 길을 익히기 좋다.' },
+  { row: 3, name: '이끼습지', risk: '보통', note: '젖은 흙과 푸른 이끼가 발걸음을 늦춘다.' },
+  { row: 4, name: '붉은협곡', risk: '보통', note: '붉은 절벽 사이로 매복 흔적이 이어진다.' },
+  { row: 5, name: '낡은역참', risk: '보통', note: '오래된 역참 길목이라 상인과 떠돌이가 모인다.' },
+  { row: 6, name: '안개벌판', risk: '높음', note: '시야가 짧아지고 멀리서 접속음만 들린다.' },
+  { row: 7, name: '검은고성터', risk: '높음', note: '허물어진 성벽 아래 고성 파수꾼의 표식이 남아 있다.' },
+  { row: 8, name: '유리폐허', risk: '높음', note: '깨진 유리 같은 돌들이 달빛을 반사한다.' },
+  { row: 9, name: '별무덤', risk: '매우 높음', note: '사라진 유저들의 이름표가 별처럼 박혀 있다.' },
+  { row: 10, name: '무한전선', risk: '매우 높음', note: '무한대전의 다음 장으로 이어지는 전선이다.' }
+];
+const frontierSpecials = {
+  '무한평원 01-01': { type: 'safe', label: '평원 초소', marker: 'S' },
+  '무한평원 03-05': { type: 'heal', label: '생명의 샘', marker: 'H' },
+  '무한평원 05-05': { type: 'shop', label: '낡은 역참 상점', marker: '$' },
+  '무한평원 04-10': {
+    type: 'boss',
+    label: '협곡 우두머리',
+    marker: 'B',
+    monster: { name: '협곡 우두머리', hp: 74, exp: 980, gold: 360, item: '붉은 협곡 표식', trait: '우두머리' }
+  },
+  '무한평원 07-07': {
+    type: 'boss',
+    label: '고성 파수장',
+    marker: 'B',
+    monster: { name: '고성 파수장', hp: 96, exp: 1320, gold: 520, item: '검은 고성 열쇠', trait: '단단함' }
+  },
+  '무한평원 10-10': {
+    type: 'boss',
+    label: '무한전선 감시자',
+    marker: 'B',
+    monster: { name: '무한전선 감시자', hp: 128, exp: 1800, gold: 760, item: '무한전선 깃발', trait: '우두머리' }
+  }
+};
 
 function frontierRoomName(row, col) {
   return `무한평원 ${String(row).padStart(2, '0')}-${String(col).padStart(2, '0')}`;
@@ -73,6 +117,15 @@ function frontierCoord(name) {
   return { row, col };
 }
 
+function frontierRegion(name) {
+  const coord = frontierCoord(name);
+  return coord ? frontierRegions[coord.row - 1] : null;
+}
+
+function frontierSpecial(name = roomName) {
+  return frontierSpecials[name] || null;
+}
+
 function buildFrontierRooms() {
   for (let row = 1; row <= FRONTIER_SIZE; row += 1) {
     for (let col = 1; col <= FRONTIER_SIZE; col += 1) {
@@ -82,9 +135,12 @@ function buildFrontierRooms() {
       if (col < FRONTIER_SIZE) exits.push(frontierRoomName(row, col + 1));
       if (row < FRONTIER_SIZE) exits.push(frontierRoomName(row + 1, col));
       if (col > 1) exits.push(frontierRoomName(row, col - 1));
-      rooms[frontierRoomName(row, col)] = {
+      const name = frontierRoomName(row, col);
+      const region = frontierRegion(name);
+      const special = frontierSpecials[name];
+      rooms[name] = {
         exits,
-        desc: `폐광 너머로 이어진 무한평원 ${String(row).padStart(2, '0')}-${String(col).padStart(2, '0')} 구역이다. 낮은 풀, 낡은 표지석, 멀리 보이는 접속 불빛이 길을 만든다.`
+        desc: `${region.name} ${String(row).padStart(2, '0')}-${String(col).padStart(2, '0')} 구역이다. ${region.note} 위험도: ${region.risk}.${special ? ` 특수지점: ${special.label}.` : ''}`
       };
     }
   }
@@ -171,7 +227,12 @@ const story = [
   { title: '북문 조사', goal: '북문을 조사해 다음 장의 길을 열어라.', hint: '이동 북문 → 조사' },
   { title: '숲길 정찰', goal: '북문 밖 숲을 조사해 폐광 입구를 찾아라.', hint: '이동 북문 밖 숲 → 조사' },
   { title: '폐광 입구', goal: '폐광 입구의 우두머리를 쓰러뜨려 새 장비를 얻어라.', hint: '이동 폐광 입구 → 사냥' },
-  { title: '열린 대전', goal: '사냥, 수련, 장비, 팀업을 반복해 더 깊은 지역을 준비하라.', hint: '임무 / 사냥 / 착용 / 팀교체 / 네코' }
+  { title: '평원 진입', goal: '무한평원 01-01에 들어가 초입초원을 조사하라.', hint: '이동 무한평원 01-01 → 조사' },
+  { title: '표지석 조사', goal: '무한평원 02-02의 표지석 벌판에서 길의 규칙을 확인하라.', hint: '이동 무한평원 02-02 → 조사' },
+  { title: '역참 정비', goal: '무한평원 05-05의 낡은역참에서 보급로를 확인하라.', hint: '이동 무한평원 05-05 → 조사 / 품목' },
+  { title: '고성 파수장', goal: '무한평원 07-07의 고성 파수장을 쓰러뜨려 열쇠를 얻어라.', hint: '이동 무한평원 07-07 → 사냥 고성 파수장' },
+  { title: '무한전선', goal: '무한평원 10-10의 감시자를 쓰러뜨려 다음 장의 깃발을 얻어라.', hint: '이동 무한평원 10-10 → 사냥 무한전선 감시자' },
+  { title: '열린 대전', goal: '사냥, 수련, 장비, 팀업, 탐험을 반복해 더 깊은 지역을 준비하라.', hint: '자동목표 / 사냥 / 강화 / 팀교체 / 네코' }
 ];
 
 const roomNpcs = {
@@ -213,12 +274,13 @@ const frontierMonsterNames = [
 function frontierEncounters(room = roomName) {
   const coord = frontierCoord(room);
   if (!coord) return [];
+  const special = frontierSpecials[room];
   const depth = coord.row + coord.col;
   const base = 22 + depth * 5;
   const firstName = frontierMonsterNames[(coord.row + coord.col) % frontierMonsterNames.length];
   const secondName = frontierMonsterNames[(coord.row * 3 + coord.col * 5) % frontierMonsterNames.length];
   const traits = Object.keys(monsterTraits);
-  return [
+  const encounters = [
     {
       name: `${firstName} ${coord.row}-${coord.col}`,
       hp: base,
@@ -236,6 +298,7 @@ function frontierEncounters(room = roomName) {
       trait: traits[(depth + coord.row) % traits.length]
     }
   ];
+  return special?.type === 'boss' ? [special.monster].concat(encounters) : encounters;
 }
 
 function encountersForRoom(room = roomName) {
@@ -452,6 +515,35 @@ function teamLabel() {
   return team.length ? team.map((name) => `${name}(${allyRole(name).label})`).join(', ') : '없음';
 }
 
+function roomZoneText(name = roomName) {
+  const region = frontierRegion(name);
+  const special = frontierSpecial(name);
+  if (!region && !special) return '';
+  return [region ? `${region.name} / 위험 ${region.risk}` : '', special ? special.label : ''].filter(Boolean).join(' / ');
+}
+
+function canShopHere() {
+  return roomName === '장터' || frontierSpecial(roomName)?.type === 'shop';
+}
+
+function currentAutoMode() {
+  return autoModes[autoModeEl?.value] ? autoModeEl.value : 'story';
+}
+
+function setAutoMode(input = '') {
+  const value = input.trim();
+  const mode = Object.keys(autoModes).find((key) => key === value)
+    || Object.keys(autoModes).find((key) => autoModes[key].includes(value));
+  if (!mode) {
+    append(`자동 목표: ${Object.entries(autoModes).map(([key, label]) => `${key}=${label}`).join(' / ')}`);
+    return;
+  }
+  autoModeEl.value = mode;
+  saveGameState();
+  renderStatusPanel();
+  append(`자동 목표를 ${autoModes[mode]}(으)로 바꿨습니다.`);
+}
+
 function frontierMapText() {
   const current = frontierCoord(roomName);
   return Array.from({ length: FRONTIER_SIZE }, (_, rowIndex) => (
@@ -459,7 +551,9 @@ function frontierMapText() {
       const row = rowIndex + 1;
       const col = colIndex + 1;
       const code = `${String(row).padStart(2, '0')}-${String(col).padStart(2, '0')}`;
-      return current && current.row === row && current.col === col ? `[${code}]` : code;
+      const marker = frontierSpecials[frontierRoomName(row, col)]?.marker || '.';
+      const cell = `${code}${marker}`;
+      return current && current.row === row && current.col === col ? `[${cell}]` : cell;
     }).join(' ')
   )).join('\n');
 }
@@ -478,7 +572,9 @@ ${here('초보사냥터')}  ${here('북문 밖 숲')}
 
 [무한평원 100구역]
 폐광 입구에서 01-01로 진입한다.
-${frontierMapText()}`;
+표식: S 안전 / $ 상점 / H 회복 / B 보스
+${frontierMapText()}
+권역: ${frontierRegions.map((region, index) => `${String(index + 1).padStart(2, '0')} ${region.name}(${region.risk})`).join(' / ')}`;
 }
 
 function nekoProfile() {
@@ -498,6 +594,7 @@ function saveGameState() {
     localStorage.setItem(GAME_STATE_KEY, JSON.stringify({
       roomName,
       team,
+      autoMode: currentAutoMode(),
       character: {
         title: character.title,
         level: character.level,
@@ -530,6 +627,7 @@ function loadGameState() {
     return;
   }
   if (rooms[saved.roomName]) roomName = saved.roomName;
+  if (autoModeEl && autoModes[saved.autoMode]) autoModeEl.value = saved.autoMode;
   if (Array.isArray(saved.team)) {
     team = saved.team.filter((name, index, list) => names.includes(name) && list.indexOf(name) === index).slice(0, 4);
   }
@@ -580,7 +678,9 @@ function renderStatusPanel() {
     `EXP: ${character.exp}/${character.expToLevel}`,
     `돈: ${character.gold} 전`,
     `위치: ${roomName}`,
+    ...(roomZoneText() ? [`지역: ${roomZoneText()}`] : []),
     `팀: ${teamLabel()}`,
+    `자동 목표: ${autoModes[currentAutoMode()]}`,
     '',
     '[현재 임무]',
     currentQuest().title,
@@ -690,6 +790,7 @@ function recoverHp() {
   }
 
   let healed = 0;
+  if (frontierSpecial(roomName)?.type === 'heal') healed += healCharacter(character.hpMax, frontierSpecial(roomName).label, 'ally');
   healed += allyHeal();
   if (character.hp < character.hpMax) healed += nekoHeal();
   if (character.hp < Math.ceil(character.hpMax * 0.55) && removeOneItem('회복약')) {
@@ -702,18 +803,18 @@ function recoverHp() {
 }
 
 function showShop() {
-  if (roomName !== '장터') {
-    append('상점 품목은 장터에서 확인할 수 있습니다. 예) 이동 주막 → 이동 장터');
+  if (!canShopHere()) {
+    append('상점 품목은 장터나 무한평원 역참에서 확인할 수 있습니다.');
     showChoices();
     return;
   }
-  append(`\n[장터 품목]\n${Object.entries(shopItems).map(([name, item]) => `${name}: ${item.price} 전 - ${item.desc}`).join('\n')}\n구매 예) 구매 회복약 / 구매 청동검\n강화 예) 강화 무기 / 강화 방어구 / 강화 장신구`, 'room');
+  append(`\n[상점 품목]\n${Object.entries(shopItems).map(([name, item]) => `${name}: ${item.price} 전 - ${item.desc}`).join('\n')}\n구매 예) 구매 회복약 / 구매 청동검\n강화 예) 강화 무기 / 강화 방어구 / 강화 장신구`, 'room');
   showChoices();
 }
 
 function buyItem(input = '') {
-  if (roomName !== '장터') {
-    append('구매는 장터에서 할 수 있습니다. 중앙광장 → 주막 → 장터로 이동하세요.');
+  if (!canShopHere()) {
+    append('구매는 장터나 무한평원 역참에서 할 수 있습니다.');
     showChoices();
     return;
   }
@@ -811,7 +912,7 @@ function findUser(query) {
 
 function look() {
   const room = rooms[roomName];
-  append(`\n[${roomName}]\n${room.desc}\n출구: ${room.exits.join(', ')}\n고정 NPC: ${(roomNpcs[roomName] || []).join(', ') || '없음'}\n주변 유저: ${roomUsers().join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
+  append(`\n[${roomName}]\n${room.desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}\n출구: ${room.exits.join(', ')}\n고정 NPC: ${(roomNpcs[roomName] || []).join(', ') || '없음'}\n주변 유저: ${roomUsers().join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
   showChoices();
 }
 
@@ -834,7 +935,7 @@ function welcome() {
 function inspectRoom() {
   const npcs = roomNpcs[roomName] || [];
   const encounters = encountersForRoom(roomName);
-  append(`\n[조사]\n${rooms[roomName].desc}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n임무 힌트: ${currentQuest().hint}`, 'room');
+  append(`\n[조사]\n${rooms[roomName].desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n임무 힌트: ${currentQuest().hint}`, 'room');
   if (roomName === '북문' && character.storyStep === 5) {
     addItem('북문 경비의 표식');
     setStoryStep(6, '북문 조사를 마쳤다. 북문 밖 숲으로 나가 새 발자국을 확인하자.');
@@ -842,6 +943,19 @@ function inspectRoom() {
   }
   if (roomName === '북문 밖 숲' && character.storyStep === 6) {
     setStoryStep(7, '숲길 끝에서 폐광 입구를 찾았다. 폐광 입구로 가서 우두머리를 상대하자.');
+    commitProgress();
+  }
+  if (roomName === '무한평원 01-01' && character.storyStep === 8) {
+    setStoryStep(9, '초입초원 지도를 읽었다. 02-02 표지석 벌판에서 길의 규칙을 확인하자.');
+    commitProgress();
+  }
+  if (roomName === '무한평원 02-02' && character.storyStep === 9) {
+    if (!hasItem('표지석 탁본')) addItem('표지석 탁본');
+    setStoryStep(10, '표지석 탁본을 얻었다. 05-05 낡은역참에서 보급로를 확인하자.');
+    commitProgress();
+  }
+  if (roomName === '무한평원 05-05' && character.storyStep === 10) {
+    setStoryStep(11, '역참 상인이 고성 파수장의 위치를 알려줬다. 07-07로 향하자.');
     commitProgress();
   }
   showChoices();
@@ -987,7 +1101,13 @@ function hunt(input = '') {
     if (character.level >= 2) setStoryStep(4, '레벨이 올랐다. 생명의나무로 가서 안내자와 대화하자.');
   }
   if (roomName === '폐광 입구' && character.storyStep === 7) {
-    setStoryStep(8, '폐광 입구의 우두머리를 넘겼다. 이제 장비와 팀을 갖추고 더 깊은 지역을 준비하자.');
+    setStoryStep(8, '폐광 입구의 우두머리를 넘겼다. 무한평원 01-01로 들어가 새 지도를 확인하자.');
+  }
+  if (roomName === '무한평원 07-07' && character.storyStep === 11 && monster.name.includes('고성 파수장')) {
+    setStoryStep(12, '검은 고성 열쇠를 얻었다. 마지막 표식은 무한평원 10-10에 있다.');
+  }
+  if (roomName === '무한평원 10-10' && character.storyStep === 12 && monster.name.includes('무한전선 감시자')) {
+    setStoryStep(13, '무한전선 깃발을 얻었다. 이제 무한평원 전체가 열린 사냥터가 되었다.');
   }
   commitProgress();
   showChoices();
@@ -1015,10 +1135,11 @@ function fallbackNeko(question = '') {
   if (/지도|맵|map/.test(q)) return `지도는 "지도"라고 입력하면 볼 수 있어. 현재 위치는 ${roomName}이야.`;
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
+  if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 팀을 쓸 수 있어.';
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/장비|착용|무기/.test(q)) return '장터에서 청동검, 가죽갑옷, 수련 부적을 살 수 있어. 산 다음 "착용 장비명", 더 키울 때는 "강화 무기"라고 해.';
   if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
-  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 점수, 소지품, 이동 장소를 쓸 수 있어.';
+  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 착용 청동검, 강화 무기, 자동목표 탐험, 이동 장소를 쓸 수 있어.';
   if (/회복|피|HP|hp|죽/.test(q)) return 'HP가 낮으면 "회복"이라고 해. 동료와 내가 먼저 돕고, 부족하면 회복약을 써. 장터에서는 "구매 회복약"도 가능해.';
   if (/사람|유저|누구/.test(q)) return `가상 유저 100명이 접속 중이야. 이 방에는 ${roomUsers().slice(0, 6).join(', ')} 등이 있어.`;
   if (/사냥|전투|초보/.test(q)) return '처음이면 수련장으로 가고, 팀을 만든 뒤 북문을 지나 초보사냥터로 가면 안전해.';
@@ -1043,7 +1164,7 @@ function buildSystemInstruction() {
     `소지품: ${character.inventory.join(', ')}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -1087,13 +1208,28 @@ function storyChoice() {
   if (character.storyStep === 7) return roomName === '폐광 입구'
     ? { label: '폐광 우두머리 사냥', command: '사냥 폐광 우두머리' }
     : { label: '폐광 입구로 이동', command: moveCommandToward('폐광 입구') };
+  if (character.storyStep === 8) return roomName === '무한평원 01-01'
+    ? { label: '초입초원 조사', command: '조사' }
+    : { label: '무한평원 진입', command: moveCommandToward('무한평원 01-01') };
+  if (character.storyStep === 9) return roomName === '무한평원 02-02'
+    ? { label: '표지석 조사', command: '조사' }
+    : { label: '표지석 벌판 이동', command: moveCommandToward('무한평원 02-02') };
+  if (character.storyStep === 10) return roomName === '무한평원 05-05'
+    ? { label: '역참 조사', command: '조사' }
+    : { label: '낡은역참 이동', command: moveCommandToward('무한평원 05-05') };
+  if (character.storyStep === 11) return roomName === '무한평원 07-07'
+    ? { label: '고성 파수장 사냥', command: '사냥 고성 파수장' }
+    : { label: '검은고성터 이동', command: moveCommandToward('무한평원 07-07') };
+  if (character.storyStep === 12) return roomName === '무한평원 10-10'
+    ? { label: '무한전선 감시자 사냥', command: '사냥 무한전선 감시자' }
+    : { label: '무한전선 이동', command: moveCommandToward('무한평원 10-10') };
   return { label: '현재 임무 확인', command: '임무' };
 }
 
 function bestAutoGearChoice() {
   if (character.storyStep < 8) return null;
   const desiredGear = ['청동검', '가죽갑옷', '수련 부적'];
-  if (roomName === '장터') {
+  if (canShopHere()) {
     const equipReady = desiredGear.find((item) => {
       const slot = equipmentCatalog[item].slot;
       return hasItem(item) && character.equipment[slot] !== item;
@@ -1122,7 +1258,7 @@ function bestAutoGearChoice() {
     return character.equipment[slot] !== item && !hasItem(item) && character.gold >= shopItems[item].price;
   });
   const canUpgrade = character.equipment.무기 !== '낡은 목검' && character.gold >= upgradeCost('무기');
-  if ((needsGear || canUpgrade) && roomName !== '장터') {
+  if ((needsGear || canUpgrade) && !canShopHere()) {
     return { label: '장터에서 장비 정비', command: moveCommandToward('장터') };
   }
   return null;
@@ -1174,15 +1310,15 @@ function makeChoices() {
   const candidate = roomUsers().find((name) => !team.includes(name)) || roomUsers()[0];
   const combat = encountersForRoom(roomName).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null;
   const heal = character.hp < character.hpMax ? { label: 'HP 회복', command: '회복' } : null;
-  const shop = roomName === '장터' ? { label: '회복약 구매', command: '구매 회복약' } : null;
-  const upgrade = roomName === '장터' ? { label: '무기 강화', command: '강화 무기' } : null;
+  const shop = canShopHere() ? { label: '회복약 구매', command: '구매 회복약' } : null;
+  const upgrade = canShopHere() ? { label: '무기 강화', command: '강화 무기' } : null;
   const raw = [
     storyChoice(),
     heal,
     shop,
     combat,
     roomName === '수련장' ? { label: '수련하기', command: '수련' } : null,
-    roomName === '장터' ? { label: '청동검 구매', command: '구매 청동검' } : null,
+    canShopHere() ? { label: '청동검 구매', command: '구매 청동검' } : null,
     upgrade,
     { label: `${room.exits[0] || roomName}(으)로 이동`, command: `이동 ${room.exits[0] || roomName}` },
     { label: `${candidate}에게 말 걸기`, command: `귓 ${candidate} 여기서 무엇을 조심해야 해?` },
@@ -1194,6 +1330,12 @@ function makeChoices() {
 
 function bestAutoChoice() {
   const choices = makeChoices().filter((choice) => !choice.command.startsWith('네코'));
+  const mode = currentAutoMode();
+  const storyPlan = storyChoice();
+  const combatPlan = choices.find((choice) => choice.command === '사냥');
+  const gearPlan = bestAutoGearChoice();
+  const teamPlan = bestAutoTeamChoice();
+  const explorePlan = bestAutoExploreChoice();
   if (character.hp <= Math.ceil(character.hpMax * 0.45)) {
     return { label: 'HP 회복', command: '회복' };
   }
@@ -1202,10 +1344,16 @@ function bestAutoChoice() {
       ? { label: '기본기 수련', command: '수련' }
       : { label: '수련장으로 이동', command: moveCommandToward('수련장') };
   }
-  return bestAutoGearChoice()
-    || bestAutoTeamChoice()
-    || bestAutoExploreChoice()
-    || choices.find((choice) => choice.command === '사냥')
+  if (mode === 'story' && storyPlan.command !== '임무') return storyPlan;
+  if (mode === 'hunt') return combatPlan || explorePlan || gearPlan || storyPlan;
+  if (mode === 'gear') return gearPlan || combatPlan || storyPlan;
+  if (mode === 'safe') return gearPlan || teamPlan || storyPlan || combatPlan;
+  if (mode === 'explore') return explorePlan || storyPlan || combatPlan;
+  if (mode === 'team') return teamPlan || combatPlan || storyPlan;
+  return gearPlan
+    || teamPlan
+    || explorePlan
+    || combatPlan
     || choices.find((choice) => choice.command !== '임무')
     || choices[0];
 }
@@ -1396,11 +1544,11 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코 회복 지원\n품목              장터 상품 보기\n구매 회복약       장터에서 회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n예) 지도\n예) 구매 청동검\n예) 착용 청동검\n예) 강화 무기\n예) 이동 무한평원 01-01`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 탐험     자동진행 목표 변경\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 팀\n예) 지도\n예) 자동목표 사냥\n예) 강화 무기\n예) 이동 무한평원 05-05`);
 }
 
 function blueprint() {
-  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 경험치 자동 레벨업 → 장비 구매/착용/강화 → 팀 역할 조합 → 새 지역 정찰.\n새 핵심: 자동진행이 회복, 장터 정비, 팀 영입/교체, 무한평원 탐험까지 판단한다.\n진행 방식: 환영 → 현감 → 초보사냥 → 수련 → 생명의나무 → 북문 조사 → 북문 밖 숲 → 폐광 입구 → 무한평원 100구역.\n확장: 몬스터/지역/대화 조건만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
+  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 레벨업 → 장비 구매/착용/강화 → 팀 역할 조합 → 무한평원 권역 탐험.\n새 핵심: 자동목표가 스토리, 사냥, 장비, 안전, 탐험, 팀 우선순위를 바꾼다.\n진행 방식: 폐광 입구 → 초입초원 → 표지석 벌판 → 낡은역참 → 검은고성터 → 무한전선.\n확장: 권역, 특수지점, 보스 데이터만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
 }
 
 function ambientChat() {
@@ -1417,7 +1565,7 @@ function connect() {
   setConnected(true);
   commitProgress();
   setStatus('입장 완료', 'online');
-  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'}\nAI 유저 100명 / 팀업 가능`);
+  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'} / 목표 ${autoModes[currentAutoMode()]}\nAI 유저 100명 / 팀업 가능`);
   clearScreen();
   append(`무한대전에 입장했습니다. 이어하기: ${roomName} / ${currentQuest().title}`);
   append('검은 고양이 네코가 조용히 옆에 앉습니다.');
@@ -1476,6 +1624,7 @@ async function runCommand(raw) {
   else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();
   else if (['사용', '마셔', '먹어'].includes(command)) useItem(body);
   else if (['자동', 'auto'].includes(command)) setAutoProgress(!autoProgress);
+  else if (['자동목표', '목표', 'mode'].includes(command)) setAutoMode(body);
   else if (['귀환', '광장'].includes(command)) move('중앙광장');
   else if (['상태', '스탯', '장비', '아이템', 'status', 'stat'].includes(command)) renderStatusPanel();
   else if (['저장', 'save'].includes(command)) {
@@ -1506,7 +1655,8 @@ disconnectBtn.addEventListener('click', disconnect);
 clearBtn.addEventListener('click', clearScreen);
 nekoBtn.addEventListener('click', () => askNeko('도움'));
 autoBtn.addEventListener('click', () => setAutoProgress(!autoProgress));
-checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'}\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
+autoModeEl.addEventListener('change', () => setAutoMode(autoModeEl.value));
+checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'} / 목표 ${autoModes[currentAutoMode()]}\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
 document.getElementById('saveSettings').addEventListener('click', saveSettings);
 document.getElementById('randomSettings').addEventListener('click', makeRandomSettings);
 document.getElementById('testGemini').addEventListener('click', testGemini);
@@ -1549,7 +1699,7 @@ loadGameState();
 setConnected(false);
 renderStatusPanel();
 setStatus('입장 대기', '');
-setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 꺼짐\nAI 유저 100명 / 팀업 가능`);
+setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 꺼짐 / 목표 ${autoModes[currentAutoMode()]}\nAI 유저 100명 / 팀업 가능`);
 append('무한대전 PC통신 접속 대기');
 append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 상태 확인  6. 자동 진행');
 append('Gemini 키는 Vercel 환경변수 GEMINI_API_KEY를 사용합니다.');
