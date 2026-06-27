@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.26.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.26.1';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -845,6 +845,14 @@ function setDiagnostics(text) {
   diagnosticsEl.textContent = text;
 }
 
+function diagnosticsText() {
+  return `GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'} / 목표 ${autoModes[currentAutoMode()]}\n무한원정 ${rogue.active ? `깊이 ${rogue.depth}` : '대기'} / AI 유저 ${names.length}명`;
+}
+
+function updateDiagnostics() {
+  setDiagnostics(diagnosticsText());
+}
+
 function setGeminiStatus(text) {
   geminiStatusEl.textContent = text;
 }
@@ -1319,6 +1327,7 @@ function renderStatusPanel() {
     '[실시간 지도]',
     mapText()
   ].join('\n');
+  updateDiagnostics();
 }
 
 function hasItem(name) {
@@ -2548,7 +2557,7 @@ function connect() {
   setConnected(true);
   commitProgress();
   setStatus('입장 완료', 'online');
-  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'} / 목표 ${autoModes[currentAutoMode()]}\n무한원정 ${rogue.active ? `깊이 ${rogue.depth}` : '대기'} / AI 유저 ${names.length}명`);
+  updateDiagnostics();
   clearScreen();
   append(`무한대전에 입장했습니다. 이어하기: ${roomName} / ${currentQuest().title}`);
   append('검은 고양이 네코가 조용히 옆에 앉습니다.');
@@ -2689,7 +2698,7 @@ loadGameState();
 setConnected(false);
 renderStatusPanel();
 setStatus('입장 대기', '');
-setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 꺼짐 / 목표 ${autoModes[currentAutoMode()]}\n무한원정 ${rogue.active ? `깊이 ${rogue.depth}` : '대기'} / AI 유저 ${names.length}명`);
+updateDiagnostics();
 append('무한대전 PC통신 접속 대기');
 append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 자동 진행');
 append('Gemini 키는 Vercel 환경변수 GEMINI_API_KEY를 사용합니다.');
