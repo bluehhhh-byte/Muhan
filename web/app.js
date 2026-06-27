@@ -385,7 +385,7 @@ function checkLabel(margin) {
   if (margin >= 30) return '치명';
   if (margin >= 12) return '강타';
   if (margin >= 0) return '명중';
-  if (margin >= -10) return '방어';
+  if (margin >= -18) return '방어';
   return '실패';
 }
 
