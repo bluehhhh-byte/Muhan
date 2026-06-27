@@ -107,6 +107,8 @@ async function submit(command) {
   if (!screenText().includes('[AI 사회]') || !screenText().includes('현재 접속자: 201명')) throw new Error('AI 사회 결혼/증가 사건 실패');
   if (!elements.diagnostics.textContent.includes('AI 유저 201명')) throw new Error('진단창 AI 유저 증가 반영 실패');
   if (!elements.statusPanel.textContent.includes('[현재상태]') || !elements.statusPanel.textContent.includes('감정: 기쁨')) throw new Error('AI 사회 사건 현재상태 반영 실패');
+  await submit('사회 투자');
+  if (!elements.statusPanel.textContent.includes('[경제]') || !elements.statusPanel.textContent.includes('새 개념:')) throw new Error('AI 투자 경제 사건 반영 실패');
   await submit('지도');
   if (!screenText().includes('[지도]') || !screenText().includes('[중앙광장]')) throw new Error('지도 표시 실패');
   if (!screenText().includes('표식: S 안전 / $ 상점 / H 회복 / B 보스')) throw new Error('무한평원 지도 표식 실패');
@@ -131,6 +133,8 @@ async function submit(command) {
   await submit('1');
   if (!elements.statusPanel.textContent.includes('위치: 초보사냥터')) throw new Error('추천 이동으로 초보사냥터 도착 실패');
   await submit('팀 검객루안');
+  await submit('선물 검객루안');
+  if (!screenText().includes('[동료 선물]') || !elements.statusPanel.textContent.includes('급여 계약')) throw new Error('동료 선물/급여 경제 반영 실패');
   await submit('1');
   if (!screenText().includes('[전투]')) throw new Error('추천 선택으로 전투가 실행되지 않음');
   if (!screenText().includes('Lv.') || !screenText().includes('[전투 과정]')) throw new Error('레벨 스케일 전투 로그 표시 실패');
@@ -151,6 +155,10 @@ async function submit(command) {
   await submit('이동 중앙광장');
   await submit('이동 주막');
   await submit('이동 장터');
+  await submit('네코훈련 행운');
+  if (!screenText().includes('[네코 훈련]') || !elements.statusPanel.textContent.includes('훈련: 전투 0 / 행운 1')) throw new Error('네코 유료 훈련 실패');
+  await submit('정보구매 무한평원 05-05');
+  if (!screenText().includes('[정보 구매]') || !screenText().includes('무한평원 05-05')) throw new Error('정보 구매 실패');
   await submit('품목');
   if (!screenText().includes('철검') || !screenText().includes('사냥꾼 부적')) throw new Error('고급 장비 상점 표시 실패');
   await submit('구매 회복약');
@@ -241,7 +249,7 @@ async function submit(command) {
   if (elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('자동 진행 장소 2회 제한 이동 실패');
   if (!screenText().includes('장소 행동 2회 완료')) throw new Error('자동 진행 강제 이동 안내 실패');
   await submit('연성');
-  if (!screenText().includes('[네코 연성]') || !screenText().includes('특수')) throw new Error('네코 아이템 연성 실패');
+  if (!screenText().includes('[네코 연성]') || !screenText().includes('비용:') || !screenText().includes('특수')) throw new Error('네코 아이템 유료 연성 실패');
   if (!/연성 [1-9]/.test(elements.statusPanel.textContent)) throw new Error('네코 연성 기억 누적 실패');
   await submit('사회 살해');
   if (!screenText().includes('즉시 체포') || !screenText().includes('현재 접속자: 199명')) throw new Error('AI 사회 범죄/체포 사건 실패');

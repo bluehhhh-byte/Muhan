@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.27.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.28.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -51,9 +51,12 @@ let names = [
   '도깨비불', '호수', '하늬', '은도끼', '불새', '그림자', '찬솔', '담쟁이', '무명검', '파천'
 ];
 
-const aiAbilityCatalog = ['결혼', '살해', '체포', '약탈', '중재', '치유', '상단', '소문', '보호', '스승'];
+const aiAbilityCatalog = ['결혼', '살해', '체포', '약탈', '중재', '치유', '상단', '소문', '보호', '스승', '투자', '파산', '고용', '기부'];
 const generatedUserWords = ['가람', '누리', '다래', '로하', '바림', '새온', '아린', '여명', '이솔', '찬별', '타래', '하랑', '휘온', '비설', '연담', '초린'];
 let aiBirthSeq = 1;
+let aiWealth = {};
+let economy = { index: 100, fund: 0, last: '광장 장터 개장', concepts: [] };
+let nekoTraining = { combat: 0, luck: 0, counsel: 0 };
 
 function hashName(name) {
   return Array.from(name).reduce((hash, char) => hash + char.charCodeAt(0), 0);
@@ -103,6 +106,7 @@ function removeAiUser(name) {
   names.splice(index, 1);
   team = team.filter((member) => member !== name);
   delete teamTrust[name];
+  delete aiWealth[name];
   return true;
 }
 
@@ -1108,6 +1112,39 @@ function raiseTeamTrust(amount = 1) {
   });
 }
 
+function wealthFor(name) {
+  if (!names.includes(name)) return 0;
+  if (aiWealth[name] === undefined) aiWealth[name] = 80 + (hashName(name) % 220);
+  return Math.max(0, Number(aiWealth[name]) || 0);
+}
+
+function setWealth(name, amount) {
+  if (!names.includes(name)) return;
+  aiWealth[name] = Math.max(0, Math.round(amount));
+}
+
+function addEconomyConcept(concept) {
+  if (!concept) return;
+  economy.concepts = [concept].concat(economy.concepts.filter((item) => item !== concept)).slice(0, 8);
+}
+
+function shiftEconomy(delta, concept, text) {
+  economy.index = Math.max(40, Math.min(180, Math.round((Number(economy.index) || 100) + delta)));
+  economy.last = text || economy.last;
+  addEconomyConcept(concept);
+}
+
+function spendGold(cost, reason) {
+  if (character.gold < cost) {
+    append(`${reason} 비용이 부족합니다. 필요 ${cost} 전 / 보유 ${character.gold} 전`);
+    showChoices();
+    return false;
+  }
+  character.gold -= cost;
+  economy.fund = Math.max(0, Math.round((Number(economy.fund) || 0) + cost));
+  return true;
+}
+
 function roomZoneText(name = roomName) {
   const region = frontierRegion(name);
   const special = frontierSpecial(name);
@@ -1213,13 +1250,13 @@ function nekoProfile() {
   const settings = currentSettings();
   const level = Math.max(1, Math.min(99, Number(settings.level) || 1));
   const equipLuck = equipmentBonus().luck || 0;
-  const luck = Math.max(0, Math.min(99, Number(settings.luck) || 0)) + equipLuck + Math.floor(nekoMemory.level / 2);
+  const luck = Math.max(0, Math.min(99, Number(settings.luck) || 0)) + equipLuck + Math.floor(nekoMemory.level / 2) + nekoTraining.luck * 2;
   const ability = settings.ability || '길찾기와 명령어 해석';
   const role = settings.role || '길잡이';
   const risk = settings.risk || '균형';
   const memoryBonus = Math.min(6, Math.floor(nekoMemory.level / 3));
-  const combat = 2 + Math.floor(level / 8) + memoryBonus + (/전투|전술|공격/.test(ability) || role === '전술가' ? 4 : 0);
-  const guard = Math.floor(level / 15) + Math.floor(memoryBonus / 2) + (/위험|예지|생존/.test(ability) || role === '수호자' || risk === '안전' ? 3 : 0);
+  const combat = 2 + Math.floor(level / 8) + memoryBonus + nekoTraining.combat + (/전투|전술|공격/.test(ability) || role === '전술가' ? 4 : 0);
+  const guard = Math.floor(level / 15) + Math.floor(memoryBonus / 2) + Math.floor(nekoTraining.counsel / 2) + (/위험|예지|생존/.test(ability) || role === '수호자' || risk === '안전' ? 3 : 0);
   const growthRate = 1 + Math.min(0.7, level / 100) + Math.min(0.2, nekoMemory.level / 120) + (/전투|수련|성장/.test(ability) ? 0.15 : 0);
   const goldRate = 1 + Math.min(0.35, level / 180) + (/소문|탐지|상인/.test(ability) || role === '상인' ? 0.15 : 0);
   const autoDelay = risk === '공격' ? 1200 : /길찾기|명령어|예지/.test(ability) || role === '길잡이' ? 1500 : 1900;
@@ -1233,6 +1270,9 @@ function saveGameState() {
       team,
       teamTrust,
       aiUsers: names,
+      aiWealth,
+      economy,
+      nekoTraining,
       aiBirthSeq,
       visitedRooms: Array.from(visitedRooms).filter((name) => rooms[name]),
       resolvedEvents: Array.from(resolvedEvents).filter((name) => rooms[name]),
@@ -1295,6 +1335,26 @@ function loadGameState() {
   if (autoModeEl && autoModes[saved.autoMode]) autoModeEl.value = saved.autoMode;
   if (Array.isArray(saved.aiUsers)) names = cleanAiUsers(saved.aiUsers);
   if (!names.length) ensureAiUsers(200);
+  if (saved.aiWealth && typeof saved.aiWealth === 'object') {
+    aiWealth = Object.fromEntries(Object.entries(saved.aiWealth)
+      .filter(([name]) => names.includes(name))
+      .map(([name, value]) => [name, Math.max(0, Number(value) || 0)]));
+  }
+  if (saved.economy && typeof saved.economy === 'object') {
+    economy = {
+      index: Math.max(40, Math.min(180, Number(saved.economy.index) || 100)),
+      fund: Math.max(0, Number(saved.economy.fund) || 0),
+      last: String(saved.economy.last || economy.last),
+      concepts: Array.isArray(saved.economy.concepts) ? saved.economy.concepts.filter(Boolean).slice(0, 8) : []
+    };
+  }
+  if (saved.nekoTraining && typeof saved.nekoTraining === 'object') {
+    nekoTraining = {
+      combat: Math.max(0, Number(saved.nekoTraining.combat) || 0),
+      luck: Math.max(0, Number(saved.nekoTraining.luck) || 0),
+      counsel: Math.max(0, Number(saved.nekoTraining.counsel) || 0)
+    };
+  }
   aiBirthSeq = Math.max(1, Number(saved.aiBirthSeq) || aiBirthSeq);
   if (Array.isArray(saved.team)) {
     team = saved.team.filter((name, index, list) => names.includes(name) && list.indexOf(name) === index).slice(0, 4);
@@ -1377,6 +1437,12 @@ function renderStatusPanel() {
     `AI 유저: ${names.length}명`,
     ...(roomZoneText() ? [`지역: ${roomZoneText()}`] : []),
     '',
+    '[경제]',
+    `시장지수: ${economy.index}`,
+    `공동기금: ${economy.fund} 전`,
+    `최근: ${economy.last}`,
+    `새 개념: ${economy.concepts.join(', ') || '없음'}`,
+    '',
     '[현재상태]',
     `감정: ${character.mood}`,
     `장면: ${character.lastScene}`,
@@ -1408,6 +1474,7 @@ function renderStatusPanel() {
     `행운: ${neko.luck}`,
     `능력: ${neko.ability}`,
     `역할: ${neko.role} / 위험 ${neko.risk}`,
+    `훈련: 전투 ${nekoTraining.combat} / 행운 ${nekoTraining.luck} / 조언 ${nekoTraining.counsel}`,
     `전투 보조: +${neko.combat}`,
     `성장 보정: x${neko.growthRate.toFixed(2)}`,
     `자동 진행: ${autoProgress ? '켜짐' : '꺼짐'}`,
@@ -1585,6 +1652,129 @@ function buyItem(input = '') {
   append(`약장수: ${itemName} 하나 챙겨두게. 남은 돈 ${character.gold} 전.`, 'ally');
   commitProgress();
   showChoices();
+}
+
+function trainNekoWithGold(input = '') {
+  const key = /행운|운/.test(input) ? 'luck' : /위로|조언|상담/.test(input) ? 'counsel' : 'combat';
+  const label = { combat: '전투', luck: '행운', counsel: '조언' }[key];
+  const total = nekoTraining.combat + nekoTraining.luck + nekoTraining.counsel;
+  const cost = 80 + total * 45;
+  if (!spendGold(cost, `네코 ${label} 훈련`)) return;
+  nekoTraining[key] += 1;
+  shiftEconomy(1, '네코 훈련소', `네코 ${label} 훈련비 ${cost}전이 시장에 풀렸다.`);
+  rememberNeko('대화', `네코 ${label} 훈련`, 2);
+  reflect('희망', '투자는 미래의 불안을 오늘의 선택으로 바꾸는 일이다.', `네코 ${label} 훈련`);
+  commitProgress();
+  append(`\n[네코 훈련]\n분야: ${label}\n비용: ${cost} 전\n훈련: 전투 ${nekoTraining.combat} / 행운 ${nekoTraining.luck} / 조언 ${nekoTraining.counsel}\n네코: 이건 단순한 소비가 아니라, 다음 위험을 읽는 감각을 사는 거야.`, 'neko');
+  showChoices();
+}
+
+function giftTeam(input = '') {
+  if (!team.length) {
+    append('선물이나 급여를 줄 팀원이 없습니다.');
+    showChoices();
+    return;
+  }
+  const target = team.find((name) => input.includes(name));
+  const targets = target ? [target] : team;
+  const cost = targets.length * (40 + character.level * 5);
+  if (!spendGold(cost, '동료 선물')) return;
+  targets.forEach((name) => {
+    teamTrust[name] = Math.min(99, trustFor(name) + (target ? 5 : 3));
+    setWealth(name, wealthFor(name) + Math.floor(cost / targets.length));
+  });
+  shiftEconomy(1, '급여 계약', `${targets.join(', ')}에게 ${cost}전이 지급됐다.`);
+  reflect('기쁨', '관계는 마음만으로 유지되지 않고, 때로는 밥값으로도 증명된다.', `동료 선물: ${targets.join(', ')}`);
+  commitProgress();
+  append(`\n[동료 선물]\n대상: ${targets.join(', ')}\n비용: ${cost} 전\n신뢰: ${targets.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
+  showChoices();
+}
+
+function buyInformation(input = '') {
+  const cost = 50 + character.level * 8;
+  if (!spendGold(cost, '정보 구매')) return;
+  const directRoom = Object.keys(rooms).find((name) => input.includes(name));
+  const frontierNext = frontierCoord(roomName)
+    ? rooms[roomName].exits.find((exit) => {
+      const here = frontierCoord(roomName);
+      const next = frontierCoord(exit);
+      return next && next.row + next.col > here.row + here.col;
+    })
+    : '무한평원 01-01';
+  const targetRoom = directRoom || frontierNext || roomName;
+  const event = roomEvent(targetRoom);
+  const monsters = encountersForRoom(targetRoom).slice(0, 2).map((monster) => `${monster.name} Lv.${monster.level}`).join(', ') || '낮음';
+  shiftEconomy(1, '정보 상인', `${targetRoom} 정보가 ${cost}전에 거래됐다.`);
+  rememberNeko('대화', `${targetRoom} 정보 구매`, 1);
+  reflect('호기심', '정보는 위험을 없애지 않지만, 두려움의 모양을 보여준다.', `정보 구매: ${targetRoom}`);
+  commitProgress();
+  append(`\n[정보 구매]\n비용: ${cost} 전\n대상: ${targetRoom}\n위험: ${monsters}\n사건: ${event ? event.title : '없음'}\n네코: 알기 전의 위험과 알고 난 뒤의 위험은 전혀 달라.`, 'neko');
+  showChoices();
+}
+
+function paidCare(input = '') {
+  const missingHp = Math.max(0, character.hpMax - character.hp);
+  const removeCurse = rogue.curses.length && /저주|해제|요양|치료소/.test(input);
+  if (!missingHp && !removeCurse) {
+    append('치료할 부상이나 해제할 저주가 없습니다.');
+    showChoices();
+    return;
+  }
+  const cost = 55 + Math.ceil(missingHp / 2) + (removeCurse ? 70 : 0);
+  if (!spendGold(cost, '치료소')) return;
+  if (missingHp) healCharacter(character.hpMax, '치료소', 'ally');
+  const removed = removeCurse ? rogue.curses.shift() : '';
+  shiftEconomy(1, '치료 조합', `치료소가 ${cost}전을 받고 ${removed || '부상'}을 처리했다.`);
+  reflect('안도', '회복은 상처가 없던 과거로 돌아가는 것이 아니라 다시 걸을 수 있는 현재를 사는 일이다.', removed ? `저주 해제: ${removed}` : '부상 치료');
+  commitProgress();
+  append(`\n[치료소]\n비용: ${cost} 전${removed ? `\n저주 해제: ${removed}` : ''}\n현재 HP: ${character.hp}/${character.hpMax}`, 'ally');
+  showChoices();
+}
+
+function applyEconomyEvent(kind, actor, target) {
+  const actorMoney = wealthFor(actor);
+  const targetMoney = wealthFor(target);
+  if (kind === '파산') {
+    const loss = Math.min(actorMoney, 80 + (hashName(actor) % 120));
+    setWealth(actor, actorMoney - loss);
+    setWealth(target, targetMoney + Math.floor(loss * 0.2));
+    shiftEconomy(-5, '부실채권', `${actor}의 파산으로 빚문서가 돌기 시작했다.`);
+    return `${actor}이(가) 파산했다. ${loss}전 규모의 부실채권이 생기고 ${target}이(가) 일부를 헐값에 사들였다.`;
+  }
+  if (kind === '고용') {
+    const wage = Math.min(actorMoney, 45 + character.level * 10);
+    setWealth(actor, actorMoney - wage);
+    setWealth(target, targetMoney + wage);
+    if (team.includes(target)) teamTrust[target] = Math.min(99, trustFor(target) + 2);
+    shiftEconomy(2, '고용 시장', `${actor}이(가) ${target}에게 ${wage}전을 지급했다.`);
+    return `${actor}이(가) ${target}을(를) 고용했다. 급여 ${wage}전이 이동했다.`;
+  }
+  if (kind === '기부') {
+    const gift = Math.min(actorMoney, 35 + (hashName(target) % 70));
+    setWealth(actor, actorMoney - gift);
+    economy.fund += gift;
+    if (character.hp < character.hpMax) character.hp = Math.min(character.hpMax, character.hp + 5);
+    shiftEconomy(1, '구호 기금', `${actor}의 기부금 ${gift}전이 공동기금에 들어왔다.`);
+    return `${actor}이(가) ${gift}전을 기부했다. 주막에는 구호 기금이라는 새 말이 돌기 시작했다.`;
+  }
+  const stake = Math.min(actorMoney, 50 + (hashName(target) % 100));
+  const success = Math.random() + economy.index / 260 > 0.82;
+  setWealth(actor, actorMoney - stake + (success ? stake * 2 : Math.floor(stake * 0.25)));
+  setWealth(target, targetMoney + (success ? Math.floor(stake * 0.4) : Math.floor(stake * 0.1)));
+  shiftEconomy(success ? 4 : -4, success ? '투자 조합' : '실패 담보', `${actor}의 투자 ${success ? '성공' : '실패'}`);
+  return success
+    ? `${actor}이(가) ${target}에게 ${stake}전을 투자해 성공했다. 배당과 소문이 시장을 달궜다.`
+    : `${actor}이(가) ${target}에게 ${stake}전을 투자했지만 실패했다. 실패 담보라는 새 거래가 생겼다.`;
+}
+
+function economyEvent(input = '') {
+  const kind = /파산/.test(input) ? '파산' : /고용/.test(input) ? '고용' : /기부/.test(input) ? '기부' : '투자';
+  const actor = pick(names);
+  const target = pick(names.filter((name) => name !== actor));
+  const text = applyEconomyEvent(kind, actor, target);
+  append(`\n[경제]\n${text}\n시장지수: ${economy.index}\n새 개념: ${economy.concepts[0] || '없음'}`, 'ally');
+  commitProgress();
+  renderStatusPanel();
 }
 
 function setStoryStep(step, text) {
@@ -1825,6 +2015,14 @@ function fusionIngredients(input = '') {
   return (nonPotion.length >= 2 ? nonPotion : character.inventory).slice(0, 3);
 }
 
+function forgeCost(input, ingredients) {
+  const invested = /투자|고급|안전|희귀/.test(input);
+  return {
+    invested,
+    cost: 50 + ingredients.length * 20 + character.level * 5 + (invested ? 120 : 0)
+  };
+}
+
 function forgeItem(input = '') {
   const ingredients = fusionIngredients(input);
   if (ingredients.length < 2) {
@@ -1834,8 +2032,10 @@ function forgeItem(input = '') {
   }
 
   const neko = nekoProfile();
-  const roll = Math.random() + neko.luck / 120 + ingredients.length * 0.05;
-  const cursed = roll < 0.22;
+  const forge = forgeCost(input, ingredients);
+  if (!spendGold(forge.cost, '네코 연성')) return;
+  const roll = Math.random() + neko.luck / 120 + ingredients.length * 0.05 + (forge.invested ? 0.18 : 0);
+  const cursed = roll < (forge.invested ? 0.12 : 0.22);
   const tier = cursed ? '불길한' : roll >= 1.25 ? '전설' : roll >= 0.95 ? '희귀' : '기묘';
   const special = cursed ? '저주' : pick(['흡혈', '탐욕', '성장', '수호', '치명', '예지']);
   const slot = ingredients.map((item) => itemStats(item).slot).find(Boolean) || pick(['무기', '방어구', '장신구']);
@@ -1853,9 +2053,10 @@ function forgeItem(input = '') {
   ingredients.forEach(removeExactItem);
   customItems[itemName] = stats;
   addItem(itemName);
+  shiftEconomy(1, forge.invested ? '연성 투자' : '연성 수수료', `연성 비용 ${forge.cost}전이 장터에 풀렸다.`);
   rememberNeko('연성', `${ingredients.join('+')} => ${itemName}`, cursed ? 1 : tier === '전설' ? 4 : tier === '희귀' ? 3 : 2);
   commitProgress();
-  append(`\n[네코 연성]\n재료: ${ingredients.join(' + ')}\n행운 판정: ${neko.luck} / 결과 ${tier}${cursed ? ' / 뒤틀림' : ''}\n완성: ${itemName} (${itemBonusText(itemName)})\n네코: 완전 안정적인 선택은 아니지만, 이런 도박수가 가끔 판을 뒤집어.`, 'neko');
+  append(`\n[네코 연성]\n재료: ${ingredients.join(' + ')}\n비용: ${forge.cost} 전${forge.invested ? ' / 추가 투자' : ''}\n행운 판정: ${neko.luck} / 결과 ${tier}${cursed ? ' / 뒤틀림' : ''}\n완성: ${itemName} (${itemBonusText(itemName)})\n네코: 완전 안정적인 선택은 아니지만, 이런 도박수가 가끔 판을 뒤집어.`, 'neko');
   showChoices();
 }
 
@@ -2031,6 +2232,7 @@ function fallbackNeko(question = '') {
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 해고는 "팀해고 이름", 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
   if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한평원, 자동목표 팀을 쓸 수 있어.';
+  if (/돈|경제|투자|급여|선물|정보|치료소/.test(q)) return `시장지수는 ${economy.index}, 새 개념은 ${economy.concepts.join(', ') || '아직 없음'}이야. 돈은 "네코훈련 행운", "선물 이름", "정보구매", "치료소", "연성 투자", "경제 투자"로 쓸 수 있어.`;
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/연성|조합|융합|합성|도박/.test(q)) return `보관함 아이템이 2개 이상이면 "연성"으로 새 장비를 만들 수 있어. 내 행운은 ${nekoProfile().luck}이라 결과가 조금 흔들려.`;
   if (/장비|착용|무기/.test(q)) return '장터 장비를 사거나, 보관 아이템을 "연성"해서 특수능력 장비를 만들 수 있어. 착용은 "착용 장비명"이야.';
@@ -2064,6 +2266,7 @@ function buildSystemInstruction() {
     `주변 유저: ${roomUsers().map(aiUserLabel).join(', ')}`,
     `현재 팀: ${team.length ? team.join(', ') : '없음'}`,
     `캐릭터: 레벨 ${character.level}, HP ${character.hp}/${character.hpMax}, MP ${character.mp}/${character.mpMax}, 공격 ${character.attack}, 방어 ${character.defense}, 정신 ${character.spirit}, EXP ${character.exp}/${character.expToLevel}, 돈 ${character.gold}`,
+    `경제: 시장지수 ${economy.index}, 공동기금 ${economy.fund}, 최근 ${economy.last}, 새 개념 ${economy.concepts.join(', ') || '없음'}`,
     `현재 임무: ${currentQuest().title} - ${currentQuest().goal}`,
     `소지품: ${character.inventory.join(', ')}`,
     `연성 장비: ${Object.keys(customItems).join(', ') || '없음'}`,
@@ -2072,7 +2275,7 @@ function buildSystemInstruction() {
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '축적 지식과 최근 기억을 근거로 다음 행동을 더 똑똑하게 추천한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 연성, 사회, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -2488,15 +2691,22 @@ function aiSocietyEvent(requestedAbility = '') {
     }
     text = `${actor}와 ${target}이(가) 결혼했다. ${leftTeam ? `${actor}은(는) 파티를 떠났다. ` : ''}아이 ${child}이(가) 새로 접속했다.`;
   } else if (power === '살해') {
+    const seized = Math.floor(wealthFor(target) * 0.35);
+    setWealth(actor, wealthFor(actor) + seized);
+    shiftEconomy(-3, '상속 분쟁', `${target}의 재산 ${seized}전이 분쟁에 휘말렸다.`);
     removeAiUser(target);
     const arrestor = pickAiUserByAbility('체포', [actor, target]);
     if (arrestor) removeAiUser(actor);
-    text = `${actor}이(가) ${target}을(를) 살해했다.${arrestor ? ` ${arrestor}이(가) 즉시 체포해 ${actor}은(는) 접속자 명단에서 사라졌다.` : ''}`;
+    text = `${actor}이(가) ${target}을(를) 살해했다. 상속 분쟁 ${seized}전이 발생했다.${arrestor ? ` ${arrestor}이(가) 즉시 체포해 ${actor}은(는) 접속자 명단에서 사라졌다.` : ''}`;
   } else if (power === '약탈') {
+    const loot = Math.min(wealthFor(target), 40 + (hashName(actor) % 80));
+    setWealth(target, wealthFor(target) - loot);
+    setWealth(actor, wealthFor(actor) + loot);
+    shiftEconomy(-2, '치안 보험', `${actor}의 약탈로 ${loot}전이 이동했다.`);
     const arrestor = pickAiUserByAbility('체포', [actor, target]);
     if (arrestor) removeAiUser(actor);
     if (team.includes(target)) teamTrust[target] = Math.max(0, trustFor(target) - 3);
-    text = `${actor}이(가) ${target}의 짐을 약탈했다.${arrestor ? ` ${arrestor}이(가) 체포했다.` : ' 아직 붙잡히지 않았다.'}`;
+    text = `${actor}이(가) ${target}의 짐 ${loot}전어치를 약탈했다.${arrestor ? ` ${arrestor}이(가) 체포했다.` : ' 아직 붙잡히지 않았다.'}`;
   } else if (power === '체포') {
     const criminal = names.find((name) => ['살해', '약탈'].includes(aiAbility(name)) && name !== actor);
     if (criminal) removeAiUser(criminal);
@@ -2510,13 +2720,15 @@ function aiSocietyEvent(requestedAbility = '') {
     text = `${actor}이(가) ${target}을(를) 치료했다.${character.hp > before ? ' 당신도 작은 회복을 받았다.' : ''}`;
   } else if (power === '상단') {
     character.gold += 15;
-    text = `${actor}의 상단이 ${target}와 거래했다. 통행세 일부로 15전을 받았다.`;
+    text = `${actor}의 상단이 ${target}와 거래했다. 통행세 일부로 15전을 받았다.\n${applyEconomyEvent('고용', actor, target)}`;
   } else if (power === '소문') {
     text = `${actor}이(가) ${target}에게 새 소문을 퍼뜨렸다. 네코가 그 흐름을 기억했다.`;
     rememberNeko('대화', `${actor} 소문`, 1);
   } else if (power === '보호') {
     if (team.includes(target)) teamTrust[target] = Math.min(99, trustFor(target) + 2);
     text = `${actor}이(가) ${target}을(를) 보호했다.`;
+  } else if (['투자', '파산', '고용', '기부'].includes(power)) {
+    text = applyEconomyEvent(power, actor, target);
   } else {
     character.exp += 20;
     text = `${actor}이(가) ${target}에게 요령을 가르쳤다. 경험 20을 얻었다.`;
@@ -2533,7 +2745,11 @@ function aiSocietyEvent(requestedAbility = '') {
     상단: ['호기심', '거래는 돈의 이동처럼 보이지만 결국 신뢰의 모양을 드러낸다.'],
     소문: ['불안', '소문은 사실보다 빠르지만 책임보다 느리다.'],
     보호: ['안도', '누군가를 지킨다는 말은 그 사람의 시간을 함께 짊어진다는 뜻이다.'],
-    스승: ['희망', '배운다는 것은 어제의 나를 조용히 떠나보내는 일이다.']
+    스승: ['희망', '배운다는 것은 어제의 나를 조용히 떠나보내는 일이다.'],
+    투자: ['희망', '위험을 나누면 실패도 사건이 되고 성공은 공동의 기억이 된다.'],
+    파산: ['불안', '경제는 숫자의 문제가 아니라 믿음이 무너지는 속도의 문제다.'],
+    고용: ['호기심', '노동의 대가는 돈으로 시작하지만 관계의 모양으로 남는다.'],
+    기부: ['행복', '남는 것을 나누는 것이 아니라 불안을 나누는 순간 공동체가 생긴다.']
   }[power] || pick(frontierInsights);
   reflect(socialReflection[0], socialReflection[1], `AI 사회: ${text.slice(0, 36)}`);
   append(`\n[AI 사회]\n${text}\n현재 접속자: ${names.length}명`, 'ally');
@@ -2542,7 +2758,7 @@ function aiSocietyEvent(requestedAbility = '') {
 }
 
 function listUsers() {
-  append(`\n[접속자 ${names.length}명]\n${names.map((name, index) => `${String(index + 1).padStart(3, '0')} ${aiUserLabel(name)}`).join('\n')}`);
+  append(`\n[접속자 ${names.length}명]\n${names.map((name, index) => `${String(index + 1).padStart(3, '0')} ${aiUserLabel(name)} ${wealthFor(name)}전`).join('\n')}`);
 }
 
 function say(message) {
@@ -2669,7 +2885,7 @@ function dismissTeamMember(input = '') {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n연성/조합/융합    보관 아이템 2~3개를 네코가 도박수로 합성\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 사회 결혼\n예) 팀해고 검객루안\n예) 자동목표 무한평원\n예) 이동 무한평원 05-05`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한평원 05-05`);
 }
 
 function blueprint() {
@@ -2753,6 +2969,11 @@ async function runCommand(raw) {
   else if (['착용', '장착', 'equip'].includes(command)) equipItem(body);
   else if (['강화', '업그레이드', 'upgrade'].includes(command)) upgradeEquipment(body);
   else if (['연성', '조합', '융합', '합성', 'forge'].includes(command)) forgeItem(body);
+  else if (['네코훈련', '훈련네코', '고양이훈련'].includes(command)) trainNekoWithGold(body);
+  else if (['선물', '급여', '월급'].includes(command)) giftTeam(body);
+  else if (['정보구매', '정보상', '소문구매'].includes(command)) buyInformation(body);
+  else if (['치료소', '부상치료', '저주해제', '요양'].includes(command)) paidCare(`${command} ${body}`);
+  else if (['경제', '투자', '파산', '고용', '기부'].includes(command)) economyEvent(`${command} ${body}`);
   else if (['사회', '사건사회', 'social'].includes(command)) aiSocietyEvent(body);
   else if (['소지품', '소지', 'inventory'].includes(command)) showInventory();
   else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();
