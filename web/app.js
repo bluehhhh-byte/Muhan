@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.17.1';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.18.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -18,7 +18,6 @@ const disconnectBtn = document.getElementById('gameDisconnect');
 const sendBtn = document.getElementById('gameSend');
 const clearBtn = document.getElementById('gameClear');
 const nekoBtn = document.getElementById('gameEnter');
-const checkStatusBtn = document.getElementById('checkStatus');
 const autoBtn = document.getElementById('gameAuto');
 const autoModeEl = document.getElementById('autoMode');
 const autoScrollEl = document.getElementById('autoScroll');
@@ -66,6 +65,7 @@ const autoModes = {
   gear: '장비 우선',
   safe: '안전 우선',
   explore: '탐험 우선',
+  frontier: '무한평원',
   team: '팀 우선'
 };
 const frontierRegions = [
@@ -1326,7 +1326,7 @@ function fallbackNeko(question = '') {
   if (/지도|맵|map/.test(q)) return `지도는 "지도"라고 입력하면 볼 수 있어. 현재 위치는 ${roomName}이야.`;
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
-  if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 팀을 쓸 수 있어.';
+  if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한평원, 자동목표 팀을 쓸 수 있어.';
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/장비|착용|무기/.test(q)) return '장터에서 청동검, 가죽갑옷, 수련 부적을 살 수 있어. 산 다음 "착용 장비명", 더 키울 때는 "강화 무기"라고 해.';
   if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
@@ -1355,7 +1355,7 @@ function buildSystemInstruction() {
     `소지품: ${character.inventory.join(', ')}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -1496,6 +1496,26 @@ function bestAutoExploreChoice() {
   return nextRoom ? { label: `${nextRoom} 탐험`, command: `이동 ${nextRoom}` } : null;
 }
 
+function bestFrontierMoveChoice() {
+  if (!frontierCoord(roomName)) return { label: '무한평원 진입', command: moveCommandToward('무한평원 01-01') };
+  const coord = frontierCoord(roomName);
+  const exits = rooms[roomName].exits.filter((exit) => frontierCoord(exit));
+  const nextRoom = exits.find((exit) => {
+    const next = frontierCoord(exit);
+    return !visitedRooms.has(exit) && next.row + next.col > coord.row + coord.col;
+  }) || exits.find((exit) => {
+    const next = frontierCoord(exit);
+    return next.row + next.col > coord.row + coord.col;
+  }) || exits.find((exit) => !visitedRooms.has(exit)) || exits[0];
+  return nextRoom ? { label: `${nextRoom} 깊은 탐험`, command: `이동 ${nextRoom}` } : null;
+}
+
+function bestAutoFrontierChoice() {
+  if (character.hp <= Math.ceil(character.hpMax * 0.45)) return { label: 'HP 회복', command: '회복' };
+  if (!frontierCoord(roomName)) return bestFrontierMoveChoice();
+  return eventChoice() || bestFrontierMoveChoice();
+}
+
 function bestAutoMoveChoice() {
   const storyPlan = storyChoice();
   if (storyPlan.command.startsWith('이동 ')) return storyPlan;
@@ -1587,6 +1607,7 @@ function bestAutoChoice() {
   if (mode === 'gear') return gearPlan || eventPlan || combatPlan || storyPlan;
   if (mode === 'safe') return gearPlan || teamPlan || eventPlan || storyPlan || combatPlan;
   if (mode === 'explore') return eventPlan || explorePlan || storyPlan || combatPlan;
+  if (mode === 'frontier') return bestAutoFrontierChoice();
   if (mode === 'team') return teamPlan || eventPlan || combatPlan || storyPlan;
   return gearPlan
     || teamPlan
@@ -1603,14 +1624,16 @@ function showChoices() {
 }
 
 function setAutoButton() {
-  autoBtn.textContent = autoProgress ? '6. 자동 진행 끄기' : '6. 자동 진행 켜기';
+  autoBtn.textContent = autoProgress ? '5. 자동 진행 끄기' : '5. 자동 진행 켜기';
   autoBtn.disabled = !connected;
   renderStatusPanel();
 }
 
 async function autoTick() {
   if (!connected || !autoProgress || autoBusy) return;
-  const forcedMove = autoRoomActions >= 2 ? bestAutoMoveChoice() : null;
+  const forcedMove = autoRoomActions >= 2
+    ? (currentAutoMode() === 'frontier' ? bestFrontierMoveChoice() : bestAutoMoveChoice())
+    : null;
   const choice = forcedMove || freshAutoChoice(bestAutoChoice());
   if (!choice) return;
   autoBusy = true;
@@ -1803,7 +1826,7 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 탐험     자동진행 목표 변경\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 팀\n예) 조사\n예) 사건\n예) 자동목표 탐험\n예) 강화 무기\n예) 이동 무한평원 05-05`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 평원 깊은 곳 탐험\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 조사\n예) 사건\n예) 자동목표 무한평원\n예) 강화 무기\n예) 이동 무한평원 05-05`);
 }
 
 function blueprint() {
@@ -1916,7 +1939,6 @@ clearBtn.addEventListener('click', clearScreen);
 nekoBtn.addEventListener('click', () => askNeko('도움'));
 autoBtn.addEventListener('click', () => setAutoProgress(!autoProgress));
 autoModeEl.addEventListener('change', () => setAutoMode(autoModeEl.value));
-checkStatusBtn.addEventListener('click', () => setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'} / 목표 ${autoModes[currentAutoMode()]}\nAI 유저 100명 / 팀 ${team.length ? team.join(', ') : '없음'}`));
 document.getElementById('saveSettings').addEventListener('click', saveSettings);
 document.getElementById('randomSettings').addEventListener('click', makeRandomSettings);
 document.getElementById('testGemini').addEventListener('click', testGemini);
@@ -1961,5 +1983,5 @@ renderStatusPanel();
 setStatus('입장 대기', '');
 setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 꺼짐 / 목표 ${autoModes[currentAutoMode()]}\nAI 유저 100명 / 팀업 가능`);
 append('무한대전 PC통신 접속 대기');
-append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 상태 확인  6. 자동 진행');
+append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 자동 진행');
 append('Gemini 키는 Vercel 환경변수 GEMINI_API_KEY를 사용합니다.');

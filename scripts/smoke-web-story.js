@@ -35,7 +35,7 @@ function makeElement(id = '') {
 const ids = [
   'status', 'diagnostics', 'gameScreen', 'statusPanel', 'gameCommand', 'gameForm',
   'gameConnect', 'gameDisconnect', 'gameSend', 'gameClear', 'gameEnter',
-  'checkStatus', 'gameAuto', 'autoMode', 'autoScroll', 'geminiTestStatus', 'geminiModel', 'nekoGender',
+  'gameAuto', 'autoMode', 'autoScroll', 'geminiTestStatus', 'geminiModel', 'nekoGender',
   'nekoTone', 'nekoLevel', 'nekoAbility', 'nekoPrompt', 'saveSettings',
   'randomSettings', 'testGemini'
 ];
@@ -187,6 +187,15 @@ async function submit(command) {
   if (!screenText().includes('[01-01S]') || !screenText().includes('10-10B')) throw new Error('무한평원 100구역 지도 표시 실패');
   await submit('조사');
   if (!screenText().includes('평원')) throw new Error('무한평원 조우 생성 실패');
+  await submit('자동목표 무한평원');
+  if (!elements.statusPanel.textContent.includes('자동 목표: 무한평원')) throw new Error('무한평원 자동 목표 변경 실패');
+  await submit('자동');
+  await context.autoTick();
+  await context.autoTick();
+  await context.autoTick();
+  if (elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('무한평원 자동 진행이 깊은 지역으로 이동하지 않음');
+  if (!screenText().includes('깊은 탐험')) throw new Error('무한평원 깊은 탐험 로그가 없음');
+  await submit('자동');
   await submit('자동목표 사냥');
   if (!elements.statusPanel.textContent.includes('자동 목표: 사냥 우선')) throw new Error('자동 목표 변경 실패');
   await submit('자동');
