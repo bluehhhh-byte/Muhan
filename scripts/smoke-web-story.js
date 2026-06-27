@@ -187,6 +187,10 @@ async function submit(command) {
   if (!screenText().includes('[01-01S]') || !screenText().includes('10-10B')) throw new Error('무한평원 100구역 지도 표시 실패');
   await submit('조사');
   if (!screenText().includes('평원')) throw new Error('무한평원 조우 생성 실패');
+  await submit('원정');
+  if (!screenText().includes('[무한원정]') || !screenText().includes('[유물]')) throw new Error('무한원정 시작/유물 지급 실패');
+  if (!elements.statusPanel.textContent.includes('[무한원정]') || !elements.statusPanel.textContent.includes('상태: 진행 중')) throw new Error('무한원정 상태창 표시 실패');
+  if (!elements.statusPanel.textContent.includes('유물:')) throw new Error('무한원정 유물 상태 표시 실패');
   await submit('자동목표 무한평원');
   if (!elements.statusPanel.textContent.includes('자동 목표: 무한평원')) throw new Error('무한평원 자동 목표 변경 실패');
   await submit('자동');

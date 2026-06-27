@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.18.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.19.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -195,6 +195,22 @@ const monsterTraits = {
   '독': { damage: 6, expRate: 1.15, text: '독 기운이 상처를 파고든다.' },
   '우두머리': { damage: 8, expRate: 1.35, goldRate: 1.4, text: '주변 괴물을 부리는 우두머리다.' }
 };
+
+const rogueRelicCatalog = [
+  { name: '검은별 손잡이', attack: 4, desc: '공격 +4' },
+  { name: '고성 방패문양', defense: 3, desc: '방어 +3' },
+  { name: '네코의 은방울', spirit: 3, desc: '정신 +3' },
+  { name: '전선의 깃털', attack: 2, defense: 2, desc: '공격 +2, 방어 +2' },
+  { name: '상인의 주사위', goldRate: 0.22, desc: '돈 +22%' },
+  { name: '푸른 샘병', afterCombatHeal: 7, desc: '전투 뒤 HP +7' }
+];
+
+const rogueCurseCatalog = [
+  { name: '깊은 안개', damage: 2, desc: '받는 피해 +2' },
+  { name: '끊긴 접속음', goldRate: -0.18, desc: '돈 -18%' },
+  { name: '무거운 먼지', healRate: -0.25, desc: '회복 -25%' },
+  { name: '붉은 표식', damage: 3, desc: '위험 피해 +3' }
+];
 
 const character = {
   name: '무명초보',
@@ -426,6 +442,18 @@ let autoRoomCommands = [];
 let autoShopCooldown = 0;
 let visitedRooms = new Set([roomName]);
 let resolvedEvents = new Set();
+let rogue = {
+  active: false,
+  depth: 0,
+  maxDepth: 0,
+  bestDepth: 0,
+  kills: 0,
+  runs: 0,
+  fragments: 0,
+  relics: [],
+  curses: [],
+  nodes: []
+};
 let lastSpeaker = names[0];
 let nekoInteractionId = null;
 let choiceSlots = [];
@@ -441,6 +469,173 @@ function pickFresh(list) {
   recentPhrases.push(value);
   if (recentPhrases.length > 28) recentPhrases.shift();
   return value;
+}
+
+function catalogItem(catalog, name) {
+  return catalog.find((item) => item.name === name) || {};
+}
+
+function rogueRelicStats() {
+  return rogue.relics.reduce((stats, name) => {
+    const relic = catalogItem(rogueRelicCatalog, name);
+    stats.attack += relic.attack || 0;
+    stats.defense += relic.defense || 0;
+    stats.spirit += relic.spirit || 0;
+    return stats;
+  }, { attack: 0, defense: 0, spirit: 0 });
+}
+
+function rogueGoldRate() {
+  const relicRate = rogue.relics.reduce((rate, name) => rate + (catalogItem(rogueRelicCatalog, name).goldRate || 0), 0);
+  const curseRate = rogue.curses.reduce((rate, name) => rate + (catalogItem(rogueCurseCatalog, name).goldRate || 0), 0);
+  return rogue.active ? Math.max(0.45, 1 + relicRate + curseRate) : 1;
+}
+
+function rogueHealRate() {
+  const curseRate = rogue.curses.reduce((rate, name) => rate + (catalogItem(rogueCurseCatalog, name).healRate || 0), 0);
+  return rogue.active ? Math.max(0.45, 1 + curseRate) : 1;
+}
+
+function rogueDamageBonus() {
+  return rogue.active
+    ? rogue.curses.reduce((damage, name) => damage + (catalogItem(rogueCurseCatalog, name).damage || 0), 0)
+    : 0;
+}
+
+function rogueAfterCombatHeal() {
+  return rogue.active
+    ? rogue.relics.reduce((amount, name) => amount + (catalogItem(rogueRelicCatalog, name).afterCombatHeal || 0), 0)
+    : 0;
+}
+
+function rogueNodeType(name = roomName) {
+  const coord = frontierCoord(name);
+  if (!coord) return '';
+  const special = frontierSpecial(name);
+  const depth = coord.row + coord.col - 1;
+  if (special?.type === 'safe') return '안전';
+  if (special?.type === 'heal') return '휴식';
+  if (special?.type === 'shop') return '상점';
+  if (special?.type === 'boss') return '보스';
+  if (depth % 5 === 0) return '휴식';
+  if (depth % 4 === 0) return '정예';
+  return '전투';
+}
+
+function rogueSummaryText() {
+  return `[무한원정]\n상태: ${rogue.active ? '진행 중' : '대기'}\n현재 깊이: ${rogue.depth} / 이번 최고 ${rogue.maxDepth} / 역대 최고 ${rogue.bestDepth}\n처치: ${rogue.kills} / 원정 횟수 ${rogue.runs}\n파편: ${rogue.fragments}\n유물: ${rogue.relics.length ? rogue.relics.join(', ') : '없음'}\n저주: ${rogue.curses.length ? rogue.curses.join(', ') : '없음'}`;
+}
+
+function grantRogueRelic(reason = '원정 보상') {
+  if (!rogue.active) return '';
+  const pool = rogueRelicCatalog.filter((item) => !rogue.relics.includes(item.name));
+  if (!pool.length) return '';
+  const relic = pool[(rogue.maxDepth + rogue.kills + rogue.relics.length * 3) % pool.length];
+  rogue.relics.push(relic.name);
+  append(`[유물] ${reason}: ${relic.name} - ${relic.desc}`, 'ally');
+  return relic.name;
+}
+
+function addRogueCurse(reason = '깊은 원정') {
+  if (!rogue.active) return '';
+  const pool = rogueCurseCatalog.filter((item) => !rogue.curses.includes(item.name));
+  if (!pool.length) return '';
+  const curse = pool[(rogue.maxDepth + rogue.curses.length * 2) % pool.length];
+  rogue.curses.push(curse.name);
+  append(`[저주] ${reason}: ${curse.name} - ${curse.desc}`, 'choice');
+  return curse.name;
+}
+
+function enterRogueRoom() {
+  const coord = frontierCoord(roomName);
+  if (!rogue.active || !coord) return;
+  const depth = coord.row + coord.col - 1;
+  rogue.depth = depth;
+  rogue.maxDepth = Math.max(rogue.maxDepth, depth);
+  rogue.bestDepth = Math.max(rogue.bestDepth, depth);
+  if (!rogue.nodes.includes(roomName)) {
+    rogue.nodes.push(roomName);
+    append(`[원정 노드] 깊이 ${depth} / ${rogueNodeType()} / ${frontierRegion(roomName).name}`, 'choice');
+  }
+  while (rogue.curses.length < Math.floor(depth / 5)) addRogueCurse(`깊이 ${depth}`);
+}
+
+function startRogueRun() {
+  if (rogue.active) {
+    append(rogueSummaryText(), 'choice');
+    showChoices();
+    return;
+  }
+  if (character.storyStep < 8 && !frontierCoord(roomName)) {
+    append('무한원정은 폐광 입구의 우두머리를 넘기고 무한평원 입장패를 얻은 뒤 시작할 수 있습니다.', 'choice');
+    showChoices();
+    return;
+  }
+
+  rogue = {
+    ...rogue,
+    active: true,
+    depth: 0,
+    maxDepth: 0,
+    kills: 0,
+    runs: rogue.runs + 1,
+    relics: [],
+    curses: [],
+    nodes: []
+  };
+  if (!frontierCoord(roomName)) {
+    roomName = '무한평원 01-01';
+    visitedRooms.add(roomName);
+    autoRoomActions = 0;
+    autoRoomCommands = [];
+  }
+  append(`[무한원정]\n${rogue.runs}번째 원정을 시작합니다. 깊이 들어갈수록 유물은 강해지고 저주는 무거워집니다.\n탈출 명령: 원정종료 / 탈출`, 'choice');
+  grantRogueRelic('출발 보급');
+  enterRogueRoom();
+  commitProgress();
+  showChoices();
+}
+
+function finishRogueRun(success = false, reason = '탈출') {
+  if (!rogue.active) {
+    append('진행 중인 무한원정이 없습니다.');
+    showChoices();
+    return;
+  }
+  const earned = Math.max(1, Math.floor(rogue.maxDepth / 3) + rogue.relics.length + (success ? 5 : 0));
+  const finishedDepth = rogue.maxDepth;
+  const finishedKills = rogue.kills;
+  rogue.fragments += earned;
+  rogue.bestDepth = Math.max(rogue.bestDepth, finishedDepth);
+  rogue.active = false;
+  rogue.depth = 0;
+  rogue.maxDepth = 0;
+  rogue.kills = 0;
+  rogue.relics = [];
+  rogue.curses = [];
+  rogue.nodes = [];
+  if (frontierCoord(roomName)) {
+    roomName = '중앙광장';
+    visitedRooms.add(roomName);
+    autoRoomActions = 0;
+    autoRoomCommands = [];
+  }
+  character.hp = Math.max(character.hp, Math.ceil(character.hpMax * 0.5));
+  append(`[무한원정 종료]\n사유: ${reason}\n도달 깊이 ${finishedDepth}, 처치 ${finishedKills}. 무한 파편 ${earned}개를 회수했습니다.`, 'choice');
+  commitProgress();
+  showChoices();
+}
+
+function recordRogueCombat(monster) {
+  if (!rogue.active) return;
+  rogue.kills += 1;
+  const node = rogueNodeType();
+  if (node === '보스' || node === '정예' || rogue.kills % 3 === 0) {
+    grantRogueRelic(`${node} 승리`);
+  }
+  const healed = rogueAfterCombatHeal();
+  if (healed) healCharacter(healed, '푸른 샘병', 'ally');
+  append(`[원정 기록] ${monster.name} 처치. 깊이 ${rogue.depth}, 처치 ${rogue.kills}.`, 'choice');
 }
 
 function setStatus(text, className) {
@@ -532,10 +727,11 @@ function equipmentBonus() {
 
 function effectiveStats() {
   const bonus = equipmentBonus();
+  const relic = rogueRelicStats();
   return {
-    attack: character.attack + bonus.attack,
-    defense: character.defense + bonus.defense,
-    spirit: character.spirit + bonus.spirit
+    attack: character.attack + bonus.attack + relic.attack,
+    defense: character.defense + bonus.defense + relic.defense,
+    spirit: character.spirit + bonus.spirit + relic.spirit
   };
 }
 
@@ -712,6 +908,18 @@ function saveGameState() {
       visitedRooms: Array.from(visitedRooms).filter((name) => rooms[name]),
       resolvedEvents: Array.from(resolvedEvents).filter((name) => rooms[name]),
       autoMode: currentAutoMode(),
+      rogue: {
+        active: rogue.active,
+        depth: rogue.depth,
+        maxDepth: rogue.maxDepth,
+        bestDepth: rogue.bestDepth,
+        kills: rogue.kills,
+        runs: rogue.runs,
+        fragments: rogue.fragments,
+        relics: rogue.relics,
+        curses: rogue.curses,
+        nodes: rogue.nodes.filter((name) => rooms[name])
+      },
       character: {
         title: character.title,
         level: character.level,
@@ -759,6 +967,22 @@ function loadGameState() {
     teamTrust = Object.fromEntries(Object.entries(saved.teamTrust)
       .filter(([name]) => names.includes(name))
       .map(([name, value]) => [name, Math.max(0, Math.min(99, Number(value) || 0))]));
+  }
+  if (saved.rogue && typeof saved.rogue === 'object') {
+    rogue.active = Boolean(saved.rogue.active);
+    rogue.depth = Math.max(0, Number(saved.rogue.depth) || 0);
+    rogue.maxDepth = Math.max(0, Number(saved.rogue.maxDepth) || 0);
+    rogue.bestDepth = Math.max(0, Number(saved.rogue.bestDepth) || 0);
+    rogue.kills = Math.max(0, Number(saved.rogue.kills) || 0);
+    rogue.runs = Math.max(0, Number(saved.rogue.runs) || 0);
+    rogue.fragments = Math.max(0, Number(saved.rogue.fragments) || 0);
+    rogue.relics = Array.isArray(saved.rogue.relics)
+      ? saved.rogue.relics.filter((name) => rogueRelicCatalog.some((item) => item.name === name))
+      : [];
+    rogue.curses = Array.isArray(saved.rogue.curses)
+      ? saved.rogue.curses.filter((name) => rogueCurseCatalog.some((item) => item.name === name))
+      : [];
+    rogue.nodes = Array.isArray(saved.rogue.nodes) ? saved.rogue.nodes.filter((name) => rooms[name]) : [];
   }
   if (saved.character && typeof saved.character === 'object') {
     for (const key of ['title', 'level', 'hp', 'hpMax', 'mp', 'mpMax', 'attack', 'defense', 'spirit', 'exp', 'expToLevel', 'gold', 'storyStep']) {
@@ -812,6 +1036,16 @@ function renderStatusPanel() {
     ...(roomZoneText() ? [`지역: ${roomZoneText()}`] : []),
     `팀: ${teamLabel()}`,
     `자동 목표: ${autoModes[currentAutoMode()]}`,
+    '',
+    '[무한원정]',
+    `상태: ${rogue.active ? '진행 중' : '대기'}`,
+    `현재 깊이: ${rogue.depth} / 이번 최고 ${rogue.maxDepth}`,
+    `역대 최고: ${rogue.bestDepth}`,
+    `현재 노드: ${frontierCoord(roomName) ? rogueNodeType() : '없음'}`,
+    `처치: ${rogue.kills}`,
+    `파편: ${rogue.fragments}`,
+    `유물: ${rogue.relics.length ? rogue.relics.join(', ') : '없음'}`,
+    `저주: ${rogue.curses.length ? rogue.curses.join(', ') : '없음'}`,
     '',
     '[현재 임무]',
     currentQuest().title,
@@ -894,7 +1128,8 @@ function autoLevelUp(source = '경험') {
 function healCharacter(amount, source, className = 'ally') {
   if (character.hp >= character.hpMax) return 0;
   const before = character.hp;
-  character.hp = Math.min(character.hpMax, character.hp + amount);
+  const adjusted = Math.max(1, Math.round(amount * rogueHealRate()));
+  character.hp = Math.min(character.hpMax, character.hp + adjusted);
   const healed = character.hp - before;
   if (healed > 0) append(`${source}: HP ${healed} 회복. 현재 HP ${character.hp}/${character.hpMax}`, className);
   return healed;
@@ -929,13 +1164,21 @@ function autoRecoverIfCritical() {
 }
 
 function recoverHp() {
-  if (character.hp >= character.hpMax) {
+  const canRestRogue = rogue.active && rogueNodeType() === '휴식';
+  if (character.hp >= character.hpMax && !(canRestRogue && rogue.curses.length)) {
     append('HP는 이미 가득 찼습니다.');
     showChoices();
     return;
   }
 
   let healed = 0;
+  if (canRestRogue) {
+    healed += healCharacter(Math.ceil(character.hpMax * 0.45), '무한원정 휴식 노드', 'ally');
+    if (rogue.curses.length) {
+      const removed = rogue.curses.shift();
+      append(`[저주 해제] ${removed}의 압박이 옅어졌습니다.`, 'choice');
+    }
+  }
   if (frontierSpecial(roomName)?.type === 'heal') healed += healCharacter(character.hpMax, frontierSpecial(roomName).label, 'ally');
   healed += allyHeal();
   if (character.hp < character.hpMax) healed += nekoHeal();
@@ -1059,7 +1302,7 @@ function findUser(query) {
 
 function look() {
   const room = rooms[roomName];
-  append(`\n[${roomName}]\n${room.desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}\n출구: ${room.exits.join(', ')}\n고정 NPC: ${(roomNpcs[roomName] || []).join(', ') || '없음'}\n주변 유저: ${roomUsers().join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
+  append(`\n[${roomName}]\n${room.desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}${frontierCoord(roomName) ? `\n원정 노드: ${rogueNodeType()}` : ''}\n출구: ${room.exits.join(', ')}\n고정 NPC: ${(roomNpcs[roomName] || []).join(', ') || '없음'}\n주변 유저: ${roomUsers().join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
   showChoices();
 }
 
@@ -1073,7 +1316,7 @@ function showQuest() {
 }
 
 function welcome() {
-  append('\n[환영]\n무한대전은 광장에서 시작해 봐/조사로 주변을 읽고, 대화로 임무를 받고, 공격과 수련으로 경험을 얻는 PC통신식 MUD입니다.\n경험치가 충분하면 자동으로 레벨이 오르고, HP가 낮으면 회복/사용 회복약/구매 회복약으로 버틸 수 있습니다.', 'room');
+  append('\n[환영]\n무한대전은 광장에서 시작해 봐/조사로 주변을 읽고, 대화로 임무를 받고, 공격과 수련으로 경험을 얻는 PC통신식 MUD입니다.\n경험치가 충분하면 자동으로 레벨이 오르고, HP가 낮으면 회복/사용 회복약/구매 회복약으로 버틸 수 있습니다.\n무한평원에 들어간 뒤에는 "원정"으로 유물과 저주가 쌓이는 로그라이크 원정을 시작할 수 있습니다.', 'room');
   if (character.storyStep === 0) setStoryStep(1, '현감청으로 가서 현감과 대화하자.');
   commitProgress();
   showChoices();
@@ -1095,12 +1338,18 @@ function resolveRoomEvent() {
   resolvedEvents.add(roomName);
   append(`\n[장소 사건]\n${event.title}\n${event.text}`, 'choice');
   if (event.damage) {
-    const damage = Math.max(1, event.damage - teamPower().scout);
+    const beforeHp = character.hp;
+    const damage = Math.max(1, event.damage + rogueDamageBonus() - teamPower().scout);
     character.hp = Math.max(1, character.hp - damage);
     append(`위험 처리: HP ${damage} 감소. 현재 HP ${character.hp}/${character.hpMax}`, 'choice');
+    if (rogue.active && beforeHp <= damage) {
+      finishRogueRun(false, `${event.title}에서 탈진`);
+      return;
+    }
   }
   if (event.exp) character.exp += event.exp;
-  if (event.gold) character.gold += event.gold;
+  const goldGain = event.gold ? Math.round(event.gold * rogueGoldRate()) : 0;
+  if (goldGain) character.gold += goldGain;
   if (event.item && !hasItem(event.item)) {
     addItem(event.item);
     append(`획득 물품: ${event.item}`, 'ally');
@@ -1110,7 +1359,7 @@ function resolveRoomEvent() {
     raiseTeamTrust(event.trust);
     append(`[팀 신뢰] ${team.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
   }
-  append(`사건 보상: 경험 ${event.exp || 0}, 돈 ${event.gold || 0} 전`, 'choice');
+  append(`사건 보상: 경험 ${event.exp || 0}, 돈 ${goldGain} 전`, 'choice');
   autoLevelUp('장소 사건');
   commitProgress();
   showChoices();
@@ -1121,7 +1370,7 @@ function inspectRoom() {
   const encounters = encountersForRoom(roomName);
   const event = roomEvent();
   const eventText = event ? `${event.title}${eventDone() ? ' (해결됨)' : ' - "사건"으로 처리'}` : '없음';
-  append(`\n[조사]\n${rooms[roomName].desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n장소 사건: ${eventText}\n임무 힌트: ${currentQuest().hint}`, 'room');
+  append(`\n[조사]\n${rooms[roomName].desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}${frontierCoord(roomName) ? `\n원정 노드: ${rogueNodeType()}` : ''}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n장소 사건: ${eventText}\n임무 힌트: ${currentQuest().hint}`, 'room');
   if (roomName === '북문' && character.storyStep === 5) {
     addItem('북문 경비의 표식');
     setStoryStep(6, '북문 조사를 마쳤다. 북문 밖 숲으로 나가 새 발자국을 확인하자.');
@@ -1270,10 +1519,16 @@ function hunt(input = '') {
   const attackPower = stats.attack + allies.attack + neko.combat;
   const guardPower = stats.defense + allies.defense + neko.guard;
   const traitDamage = Math.max(0, (trait.damage || 0) - allies.scout);
-  const damage = Math.max(1, Math.ceil(monster.hp * 0.45) + traitDamage - guardPower);
+  const damage = Math.max(1, Math.ceil(monster.hp * 0.45) + traitDamage + rogueDamageBonus() - guardPower);
   const expGain = Math.round(monster.exp * (trait.expRate || 1) * neko.growthRate);
-  const goldGain = Math.round(monster.gold * (trait.goldRate || 1) * neko.goldRate);
+  const goldGain = Math.round(monster.gold * (trait.goldRate || 1) * neko.goldRate * rogueGoldRate());
+  const beforeHp = character.hp;
   character.hp = Math.max(1, character.hp - damage);
+  if (rogue.active && beforeHp <= damage) {
+    append(`\n[전투]\n${monster.name}에게 맞섰지만 원정의 압박이 더 컸습니다.\n피해 ${damage}. HP가 1까지 떨어져 네코가 퇴각 신호를 냅니다.`, 'choice');
+    finishRogueRun(false, `${monster.name} 전투`);
+    return;
+  }
   character.exp += expGain;
   character.gold += goldGain;
   append(`\n[전투]\n${monster.name}을(를) 공격했다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
@@ -1286,6 +1541,7 @@ function hunt(input = '') {
     addItem(monster.item);
     append(`획득 물품: ${monster.item}`, 'ally');
   }
+  recordRogueCombat(monster);
   autoLevelUp('전투 경험');
   if (character.storyStep === 2) {
     setStoryStep(3, '증거를 얻었다. 수련장으로 가서 레벨을 올리자.');
@@ -1323,6 +1579,9 @@ function trainCharacter() {
 
 function fallbackNeko(question = '') {
   const q = question.trim();
+  if (/원정|로그|유물|저주|깊이|파편/.test(q)) return rogue.active
+    ? `무한원정 진행 중이야. 깊이 ${rogue.depth}, 유물 ${rogue.relics.length}개, 저주 ${rogue.curses.length}개야. 위험하면 "원정종료"로 빠져.`
+    : '무한평원에서 "원정"을 입력하면 로그라이크식 무한원정을 시작해. 유물은 강해지고, 깊이 5마다 저주가 붙어.';
   if (/지도|맵|map/.test(q)) return `지도는 "지도"라고 입력하면 볼 수 있어. 현재 위치는 ${roomName}이야.`;
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
@@ -1330,7 +1589,7 @@ function fallbackNeko(question = '') {
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/장비|착용|무기/.test(q)) return '장터에서 청동검, 가죽갑옷, 수련 부적을 살 수 있어. 산 다음 "착용 장비명", 더 키울 때는 "강화 무기"라고 해.';
   if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
-  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 착용 청동검, 강화 무기, 자동목표 탐험, 이동 장소를 쓸 수 있어.';
+  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 사건, 사냥, 회복, 원정, 원정종료, 구매 회복약, 착용 청동검, 강화 무기, 자동목표 무한평원, 이동 장소를 쓸 수 있어.';
   if (/회복|피|HP|hp|죽/.test(q)) return 'HP가 낮으면 "회복"이라고 해. 동료와 내가 먼저 돕고, 부족하면 회복약을 써. 장터에서는 "구매 회복약"도 가능해.';
   if (/사람|유저|누구/.test(q)) return `가상 유저 100명이 접속 중이야. 이 방에는 ${roomUsers().slice(0, 6).join(', ')} 등이 있어.`;
   if (/사냥|전투|초보/.test(q)) return '처음이면 수련장으로 가고, 팀을 만든 뒤 북문을 지나 초보사냥터로 가면 안전해.';
@@ -1353,9 +1612,10 @@ function buildSystemInstruction() {
     `캐릭터: 레벨 ${character.level}, HP ${character.hp}/${character.hpMax}, MP ${character.mp}/${character.mpMax}, 공격 ${character.attack}, 방어 ${character.defense}, 정신 ${character.spirit}, EXP ${character.exp}/${character.expToLevel}, 돈 ${character.gold}`,
     `현재 임무: ${currentQuest().title} - ${currentQuest().goal}`,
     `소지품: ${character.inventory.join(', ')}`,
+    `무한원정: ${rogue.active ? `진행 중, 깊이 ${rogue.depth}, 유물 ${rogue.relics.join(', ') || '없음'}, 저주 ${rogue.curses.join(', ') || '없음'}` : `대기, 역대 최고 깊이 ${rogue.bestDepth}, 파편 ${rogue.fragments}`}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -1511,9 +1771,15 @@ function bestFrontierMoveChoice() {
 }
 
 function bestAutoFrontierChoice() {
+  if (character.storyStep < 8) return storyChoice();
+  if (!rogue.active) return { label: '무한원정 시작', command: '원정' };
   if (character.hp <= Math.ceil(character.hpMax * 0.45)) return { label: 'HP 회복', command: '회복' };
   if (!frontierCoord(roomName)) return bestFrontierMoveChoice();
-  return eventChoice() || bestFrontierMoveChoice();
+  const node = rogueNodeType();
+  if (node === '상점') return bestAutoGearChoice() || eventChoice() || bestFrontierMoveChoice();
+  if (node === '휴식' && (character.hp < character.hpMax || rogue.curses.length)) return { label: '휴식 노드 회복', command: '회복' };
+  if (node === '안전') return eventChoice() || bestFrontierMoveChoice();
+  return eventChoice() || { label: `${node} 노드 전투`, command: '사냥' };
 }
 
 function bestAutoMoveChoice() {
@@ -1543,10 +1809,14 @@ function makeChoices() {
   const heal = character.hp < character.hpMax ? { label: 'HP 회복', command: '회복' } : null;
   const shop = canShopHere() ? { label: '회복약 구매', command: '구매 회복약' } : null;
   const upgrade = canShopHere() ? { label: '무기 강화', command: '강화 무기' } : null;
+  const rogueChoice = character.storyStep >= 8
+    ? { label: rogue.active ? '무한원정 상태' : '무한원정 시작', command: '원정' }
+    : null;
   const nextExit = room.exits.find((exit) => !visitedRooms.has(exit)) || room.exits[0] || roomName;
   const raw = [
     storyChoice(),
     heal,
+    rogueChoice,
     event,
     { label: '주변 조사', command: '조사' },
     shop,
@@ -1589,7 +1859,7 @@ function bestAutoChoice() {
   const choices = makeChoices().filter((choice) => !choice.command.startsWith('네코'));
   const mode = currentAutoMode();
   const storyPlan = storyChoice();
-  const combatPlan = choices.find((choice) => choice.command === '사냥');
+  const combatPlan = encountersForRoom(roomName).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null;
   const eventPlan = eventChoice();
   const gearPlan = bestAutoGearChoice();
   const teamPlan = bestAutoTeamChoice();
@@ -1772,9 +2042,10 @@ function move(destination) {
   visitedRooms.add(roomName);
   autoRoomActions = 0;
   autoRoomCommands = [];
-  commitProgress();
   append(`${roomName}(으)로 이동했다.`);
   if (team.length) append(`${team.join(', ')}: 같이 이동했어.`);
+  enterRogueRoom();
+  commitProgress();
   look();
 }
 
@@ -1826,11 +2097,11 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 평원 깊은 곳 탐험\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 조사\n예) 사건\n예) 자동목표 무한평원\n예) 강화 무기\n예) 이동 무한평원 05-05`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 원정\n예) 사건\n예) 자동목표 무한평원\n예) 강화 무기\n예) 이동 무한평원 05-05`);
 }
 
 function blueprint() {
-  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 레벨업 → 장비 구매/착용/강화 → 팀 역할 조합 → 장소 사건 → 무한평원 권역 탐험.\n새 핵심: 자동목표가 스토리, 사냥, 장비, 안전, 탐험, 팀 우선순위를 바꾼다.\n진행 방식: 폐광 입구 → 초입초원 → 표지석 벌판 → 낡은역참 → 검은고성터 → 무한전선.\n확장: 권역, 특수지점, 사건 데이터만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
+  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 레벨업 → 장비 구매/착용/강화 → 팀 역할 조합 → 장소 사건 → 무한평원 권역 탐험.\n로그라이크 축: 원정 시작 → 노드(전투/정예/휴식/상점/보스) 선택 → 유물 획득 → 깊이 5마다 저주 → 탈출 정산.\n진행 방식: 폐광 입구 → 초입초원 → 표지석 벌판 → 낡은역참 → 검은고성터 → 무한전선 → 무한원정 반복.\n확장: 권역, 특수지점, 유물, 저주, 보스 데이터만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
 }
 
 function ambientChat() {
@@ -1847,7 +2118,7 @@ function connect() {
   setConnected(true);
   commitProgress();
   setStatus('입장 완료', 'online');
-  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'} / 목표 ${autoModes[currentAutoMode()]}\nAI 유저 100명 / 팀업 가능`);
+  setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 ${autoProgress ? '켜짐' : '꺼짐'} / 목표 ${autoModes[currentAutoMode()]}\n무한원정 ${rogue.active ? `깊이 ${rogue.depth}` : '대기'} / AI 유저 100명`);
   clearScreen();
   append(`무한대전에 입장했습니다. 이어하기: ${roomName} / ${currentQuest().title}`);
   append('검은 고양이 네코가 조용히 옆에 앉습니다.');
@@ -1899,6 +2170,8 @@ async function runCommand(raw) {
   else if (['사냥', '공격', '때려', '쳐', 'attack'].includes(command)) hunt(body);
   else if (command === '수련') trainCharacter();
   else if (['회복', '치료', 'heal'].includes(command)) recoverHp();
+  else if (['원정', '원정시작', '무한원정', 'rogue'].includes(command)) startRogueRun();
+  else if (['원정종료', '탈출', 'escape'].includes(command) || (rogue.active && ['귀환', '광장'].includes(command))) finishRogueRun(false, '수동 탈출');
   else if (['품목', '상점', 'shop'].includes(command)) showShop();
   else if (['구매', '구입', '사', 'buy'].includes(command)) buyItem(body);
   else if (['착용', '장착', 'equip'].includes(command)) equipItem(body);
@@ -1981,7 +2254,7 @@ loadGameState();
 setConnected(false);
 renderStatusPanel();
 setStatus('입장 대기', '');
-setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 꺼짐 / 목표 ${autoModes[currentAutoMode()]}\nAI 유저 100명 / 팀업 가능`);
+setDiagnostics(`GATEWAY ${APP_VERSION}\nGemini 네코 서버 키 사용\n자동 진행 꺼짐 / 목표 ${autoModes[currentAutoMode()]}\n무한원정 ${rogue.active ? `깊이 ${rogue.depth}` : '대기'} / AI 유저 100명`);
 append('무한대전 PC통신 접속 대기');
 append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 자동 진행');
 append('Gemini 키는 Vercel 환경변수 GEMINI_API_KEY를 사용합니다.');
