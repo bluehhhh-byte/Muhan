@@ -126,12 +126,21 @@ async function submit(command) {
   await submit('구매 청동검');
   await submit('착용 청동검');
   if (!elements.statusPanel.textContent.includes('무기: 청동검')) throw new Error('장비 착용 실패');
+  await submit('강화 무기');
+  if (!elements.statusPanel.textContent.includes('무기: +1')) throw new Error('장비 강화 실패');
   await submit('이동 주막');
   await submit('이동 중앙광장');
   await submit('이동 북문');
   await submit('이동 북문 밖 숲');
   await submit('사냥');
   if (!screenText().includes('특성:')) throw new Error('몬스터 특성 전투 로그가 없음');
+  await submit('이동 폐광 입구');
+  await submit('이동 무한평원 01-01');
+  if (!elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('확장 지도 진입 실패');
+  await submit('지도');
+  if (!screenText().includes('[01-01]') || !screenText().includes('10-10')) throw new Error('무한평원 100구역 지도 표시 실패');
+  await submit('조사');
+  if (!screenText().includes('평원')) throw new Error('무한평원 조우 생성 실패');
   await submit('자동');
   if (!elements.statusPanel.textContent.includes('자동 진행: 켜짐')) throw new Error('자동 진행 상태 표시 실패');
 })().catch((error) => {
