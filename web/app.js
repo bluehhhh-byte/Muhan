@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.16.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.16.1';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -476,6 +476,16 @@ function currentQuest() {
 
 function itemStats(item) {
   return equipmentCatalog[item] || {};
+}
+
+function equipmentScore(item) {
+  const stats = itemStats(item);
+  return (stats.attack || 0) * 3 + (stats.defense || 0) * 2 + (stats.spirit || 0);
+}
+
+function isBetterEquipment(item) {
+  const slot = equipmentCatalog[item]?.slot;
+  return Boolean(slot && character.equipment[slot] !== item && equipmentScore(item) > equipmentScore(character.equipment[slot]));
 }
 
 function equipmentBonus() {
@@ -1301,15 +1311,13 @@ function bestAutoGearChoice() {
   const desiredGear = ['무한전선 검', '고성검', '철검', '철갑옷', '사냥꾼 부적', '청동검', '가죽갑옷', '수련 부적', '광부의 곡괭이'];
   if (canShopHere()) {
     const equipReady = desiredGear.find((item) => {
-      const slot = equipmentCatalog[item].slot;
-      return hasItem(item) && character.equipment[slot] !== item;
+      return hasItem(item) && isBetterEquipment(item);
     });
     if (equipReady) return { label: `${equipReady} 착용`, command: `착용 ${equipReady}` };
 
     const buyReady = desiredGear.find((item) => {
       if (!shopItems[item]) return false;
-      const slot = equipmentCatalog[item].slot;
-      return character.equipment[slot] !== item && !hasItem(item) && character.gold >= shopItems[item].price;
+      return isBetterEquipment(item) && !hasItem(item) && character.gold >= shopItems[item].price;
     });
     if (buyReady) return { label: `${buyReady} 구매`, command: `구매 ${buyReady}` };
 
@@ -1326,8 +1334,7 @@ function bestAutoGearChoice() {
 
   const needsGear = desiredGear.some((item) => {
     if (!shopItems[item]) return false;
-    const slot = equipmentCatalog[item].slot;
-    return character.equipment[slot] !== item && !hasItem(item) && character.gold >= shopItems[item].price;
+    return isBetterEquipment(item) && !hasItem(item) && character.gold >= shopItems[item].price;
   });
   const canUpgrade = character.equipment.무기 !== '낡은 목검' && character.gold >= upgradeCost('무기');
   if ((needsGear || canUpgrade) && !canShopHere()) {
