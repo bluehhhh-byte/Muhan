@@ -120,6 +120,7 @@ async function submit(command) {
   await submit('1');
   if (!screenText().includes('[전투]')) throw new Error('추천 선택으로 전투가 실행되지 않음');
   if (!screenText().includes('Lv.') || !screenText().includes('[전투 과정]')) throw new Error('레벨 스케일 전투 로그 표시 실패');
+  if (!screenText().includes('2d36') || !/명중|강타|치명|방어|실패/.test(screenText())) throw new Error('2d36 대항 판정 로그 표시 실패');
   if (!screenText().includes('네코가 앞발로 빈틈을 만들었다')) throw new Error('네코 전투 참여 문구가 없음');
   if (!screenText().includes('[팀 신뢰]') || !elements.statusPanel.textContent.includes('[팀 신뢰]')) throw new Error('팀 신뢰도 상승 실패');
   if (!elements.statusPanel.textContent.includes('[네코 지식]') || !elements.statusPanel.textContent.includes('전투 1')) throw new Error('네코 전투 기억 누적 실패');

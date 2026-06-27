@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.23.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.24.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -375,16 +375,37 @@ function scaleMonster(monster, room = roomName) {
   };
 }
 
-function combatRoundText(monster, attackPower, guardPower, damage) {
+function rollD36Pair() {
+  const first = 1 + Math.floor(Math.random() * 36);
+  const second = 1 + Math.floor(Math.random() * 36);
+  return { first, second, total: first + second };
+}
+
+function checkLabel(margin) {
+  if (margin >= 30) return '치명';
+  if (margin >= 12) return '강타';
+  if (margin >= 0) return '명중';
+  if (margin >= -10) return '방어';
+  return '실패';
+}
+
+function combatDiceResult(monster, attackPower, guardPower, traitDamage, gearEffects) {
   const rounds = 3;
-  return Array.from({ length: rounds }, (_, index) => {
-    const hit = Math.max(1, Math.round((monster.hp / rounds) + attackPower * (0.18 + index * 0.04)));
-    const taken = index === rounds - 1
-      ? Math.max(0, damage - Math.floor(damage * 0.62))
-      : Math.max(0, Math.floor(damage * (index === 0 ? 0.3 : 0.32)));
-    const guardText = guardPower ? `방어 ${guardPower}` : '방어 없음';
-    return `${index + 1}턴: 피해 ${hit} 누적, 반격 ${taken} (${guardText})`;
-  }).join('\n');
+  let totalDamage = 0;
+  const lines = Array.from({ length: rounds }, (_, index) => {
+    const heroDice = rollD36Pair();
+    const monsterDice = rollD36Pair();
+    const heroScore = heroDice.total + Math.floor(attackPower / 3) + (index === 0 ? 2 : 0);
+    const monsterScore = monsterDice.total + monster.level * 2 + Math.floor((traitDamage + guardPower) / 3);
+    const margin = heroScore - monsterScore;
+    const label = checkLabel(margin);
+    const roundDamage = Math.max(0, Math.round(monster.hp * 0.1 + Math.max(0, margin) * 0.6));
+    const counter = Math.max(0, Math.round(monster.level + traitDamage + Math.max(0, -margin) * 0.35 - guardPower * 0.35 - gearEffects.damageReduction));
+    totalDamage += counter;
+    return `${index + 1}턴: 주인공 ${heroDice.first}+${heroDice.second}+보정=${heroScore} / 몬스터 ${monsterDice.first}+${monsterDice.second}+보정=${monsterScore} / ${label} / 반격 ${counter} / 피해 ${roundDamage}`;
+  });
+  const floorDamage = Math.max(1, Math.ceil(monster.hp * 0.22) + traitDamage - guardPower - gearEffects.damageReduction);
+  return { text: lines.join('\n'), damage: Math.max(1, Math.min(Math.ceil(monster.hp * 0.65), totalDamage || floorDamage)) };
 }
 
 function encountersForRoom(room = roomName) {
@@ -1727,7 +1748,8 @@ function hunt(input = '') {
   const attackPower = stats.attack + allies.attack + neko.combat + gearEffects.attackBonus;
   const guardPower = stats.defense + allies.defense + neko.guard;
   const traitDamage = Math.max(0, (trait.damage || 0) - allies.scout);
-  const damage = Math.max(1, Math.ceil(monster.hp * 0.45) + traitDamage + rogueDamageBonus() - guardPower - gearEffects.damageReduction);
+  const dice = combatDiceResult(monster, attackPower, guardPower, traitDamage + rogueDamageBonus(), gearEffects);
+  const damage = dice.damage;
   const expGain = Math.round(monster.exp * (trait.expRate || 1) * neko.growthRate * gearEffects.expRate);
   const goldGain = Math.round(monster.gold * (trait.goldRate || 1) * neko.goldRate * rogueGoldRate() * gearEffects.goldRate);
   const beforeHp = character.hp;
@@ -1739,7 +1761,7 @@ function hunt(input = '') {
   }
   character.exp += expGain;
   character.gold += goldGain;
-  append(`\n[전투]\n${monster.name} Lv.${monster.level}을(를) 공격했다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${combatRoundText(monster, attackPower, guardPower, damage)}\n총 피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
+  append(`\n[전투]\n${monster.name} Lv.${monster.level}을(를) 공격했다.\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n주사위 결과로 총 피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
   if (team.length) {
     raiseTeamTrust(1);
     append(`[팀 신뢰] ${team.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
