@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.11.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.12.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -94,13 +94,13 @@ const frontierSpecials = {
     type: 'boss',
     label: '고성 파수장',
     marker: 'B',
-    monster: { name: '고성 파수장', hp: 96, exp: 1320, gold: 520, item: '검은 고성 열쇠', trait: '단단함' }
+    monster: { name: '고성 파수장', hp: 96, exp: 1320, gold: 520, item: '고성검', trait: '단단함' }
   },
   '무한평원 10-10': {
     type: 'boss',
     label: '무한전선 감시자',
     marker: 'B',
-    monster: { name: '무한전선 감시자', hp: 128, exp: 1800, gold: 760, item: '무한전선 깃발', trait: '우두머리' }
+    monster: { name: '무한전선 감시자', hp: 128, exp: 1800, gold: 760, item: '무한전선 검', trait: '우두머리' }
   }
 };
 
@@ -161,7 +161,10 @@ const shopItems = {
   '생명환': { price: 120, heal: 28, desc: '전투 중 버티기 좋은 회복 알약이다.' },
   '청동검': { price: 180, desc: '공격 +4 무기.' },
   '가죽갑옷': { price: 160, desc: '방어 +3 방어구.' },
-  '수련 부적': { price: 220, desc: '정신 +3 장신구.' }
+  '수련 부적': { price: 220, desc: '정신 +3 장신구.' },
+  '철검': { price: 420, desc: '공격 +8 무기.' },
+  '철갑옷': { price: 380, desc: '방어 +6 방어구.' },
+  '사냥꾼 부적': { price: 460, desc: '정신 +6 장신구.' }
 };
 
 const equipmentCatalog = {
@@ -171,7 +174,12 @@ const equipmentCatalog = {
   '청동검': { slot: '무기', attack: 4 },
   '가죽갑옷': { slot: '방어구', defense: 3 },
   '수련 부적': { slot: '장신구', spirit: 3 },
-  '광부의 곡괭이': { slot: '무기', attack: 6, defense: 1 }
+  '광부의 곡괭이': { slot: '무기', attack: 6, defense: 1 },
+  '철검': { slot: '무기', attack: 8 },
+  '철갑옷': { slot: '방어구', defense: 6 },
+  '사냥꾼 부적': { slot: '장신구', spirit: 6 },
+  '고성검': { slot: '무기', attack: 11, defense: 2 },
+  '무한전선 검': { slot: '무기', attack: 15, spirit: 3 }
 };
 
 const allyRoles = [
@@ -1228,7 +1236,7 @@ function storyChoice() {
 
 function bestAutoGearChoice() {
   if (character.storyStep < 8) return null;
-  const desiredGear = ['청동검', '가죽갑옷', '수련 부적'];
+  const desiredGear = ['무한전선 검', '고성검', '철검', '철갑옷', '사냥꾼 부적', '청동검', '가죽갑옷', '수련 부적', '광부의 곡괭이'];
   if (canShopHere()) {
     const equipReady = desiredGear.find((item) => {
       const slot = equipmentCatalog[item].slot;
@@ -1237,6 +1245,7 @@ function bestAutoGearChoice() {
     if (equipReady) return { label: `${equipReady} 착용`, command: `착용 ${equipReady}` };
 
     const buyReady = desiredGear.find((item) => {
+      if (!shopItems[item]) return false;
       const slot = equipmentCatalog[item].slot;
       return character.equipment[slot] !== item && !hasItem(item) && character.gold >= shopItems[item].price;
     });
@@ -1254,6 +1263,7 @@ function bestAutoGearChoice() {
   }
 
   const needsGear = desiredGear.some((item) => {
+    if (!shopItems[item]) return false;
     const slot = equipmentCatalog[item].slot;
     return character.equipment[slot] !== item && !hasItem(item) && character.gold >= shopItems[item].price;
   });

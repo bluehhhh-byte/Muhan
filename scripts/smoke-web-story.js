@@ -125,6 +125,8 @@ async function submit(command) {
   await submit('이동 중앙광장');
   await submit('이동 주막');
   await submit('이동 장터');
+  await submit('품목');
+  if (!screenText().includes('철검') || !screenText().includes('사냥꾼 부적')) throw new Error('고급 장비 상점 표시 실패');
   await submit('구매 회복약');
   if (!screenText().includes('약장수')) throw new Error('장터 구매가 실행되지 않음');
   await submit('구매 청동검');
