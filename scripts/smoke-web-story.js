@@ -171,6 +171,13 @@ async function submit(command) {
   await submit('조사');
   if (!elements.statusPanel.textContent.includes('표지석 조사')) throw new Error('평원 진입 이후 표지석 조사 임무 실패');
   if (!elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('확장 지도 진입 실패');
+  if (!screenText().includes('장소 사건: 평원 초소 단서')) throw new Error('장소 사건 조사 표시 실패');
+  await submit('사건');
+  if (!screenText().includes('[장소 사건]') || !screenText().includes('사건 보상')) throw new Error('장소 사건 처리 실패');
+  if (!elements.statusPanel.textContent.includes('사건: 1/')) throw new Error('장소 사건 저장 표시 실패');
+  const beforeRepeatEvent = screenText();
+  await submit('사건');
+  if (!screenText().slice(beforeRepeatEvent.length).includes('이미 해결')) throw new Error('장소 사건 중복 처리 차단 실패');
   await submit('지도');
   if (!screenText().includes('[01-01S]') || !screenText().includes('10-10B')) throw new Error('무한평원 100구역 지도 표시 실패');
   await submit('조사');
@@ -185,7 +192,7 @@ async function submit(command) {
   const autoLog = screenText().slice(beforeAuto.length);
   if (!screenText().includes('[팀 신뢰]')) throw new Error('자동 사냥 실행 실패');
   if ((autoLog.match(/=> 사냥/g) || []).length > 1) throw new Error('자동 진행이 같은 방에서 사냥만 반복함');
-  if (!/=> (회복|팀|조사|귓|강화|구매|수련)/.test(autoLog)) throw new Error('자동 진행 대체 행동 선택 실패');
+  if (!/=> (회복|팀|사건|조사|귓|강화|구매|수련)/.test(autoLog)) throw new Error('자동 진행 대체 행동 선택 실패');
   await context.autoTick();
   if (elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('자동 진행 장소 2회 제한 이동 실패');
   if (!screenText().includes('장소 행동 2회 완료')) throw new Error('자동 진행 강제 이동 안내 실패');

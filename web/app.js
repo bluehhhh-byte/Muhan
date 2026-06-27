@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.16.1';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.17.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -385,6 +385,32 @@ const randomSettings = {
   ]
 };
 
+const localEvents = {
+  '중앙광장': { title: '전광판 오류', text: '푸른 전광판에 오래된 접속 기록이 흘러나온다.', exp: 40, gold: 25, item: '전광판 기록 조각' },
+  '주막': { title: '낡은 소문', text: '주막 구석에서 북문 밖 폐광 이야기를 들었다.', exp: 35, gold: 35, trust: 1 },
+  '수련장': { title: '흔들리는 허수아비', text: '네코가 허수아비의 약한 축을 찾아낸다.', exp: 90, gold: 10 },
+  '현감청': { title: '분실된 장부', text: '현감청 서랍 밑에서 초보 모험가 명단을 찾았다.', exp: 45, gold: 50 },
+  '생명의나무': { title: '푸른 잎맥', text: '나무의 잎맥이 북문 너머의 길을 잠깐 비춘다.', exp: 55, heal: 18, item: '푸른 잎맥' },
+  '장터': { title: '약장수 장부', text: '약장수의 흐트러진 장부를 맞춰 주고 작은 보급을 받았다.', exp: 45, gold: 20, item: '장터 외상표' },
+  '북문': { title: '성문 발자국', text: '성문 아래 흙먼지에서 폐광으로 이어지는 무거운 발자국을 읽었다.', exp: 60, gold: 30 },
+  '초보사냥터': { title: '작은 송곳니 둥지', text: '수풀 아래 둥지를 정리하고 쓸 만한 흔적을 챙겼다.', exp: 75, gold: 45, item: '작은 송곳니' },
+  '북문 밖 숲': { title: '안개 속 표식', text: '안개 사이로 광부들이 남긴 표식을 찾았다.', exp: 85, gold: 60, trust: 1 },
+  '폐광 입구': { title: '무너진 광차', text: '광차를 밀어 길을 넓히자 검은 돌가루 아래 물품이 드러났다.', exp: 110, gold: 80, item: '검은 돌가루' }
+};
+
+const regionEvents = [
+  { title: '초입초원 접속 흔적', text: '잔디 사이에 막 접속을 끊은 유저의 발자국이 남아 있다.', item: '초입초원 표식', trust: 1 },
+  { title: '표지석 암호', text: '낡은 표지석의 숫자 배열이 다음 길의 위험도를 알려준다.', item: '표지석 암호문' },
+  { title: '이끼습지 구조 요청', text: '젖은 이끼 아래에서 끊어진 귓속말 기록을 건져 올렸다.', item: '젖은 귓속말 기록', heal: 12 },
+  { title: '붉은협곡 매복 흔적', text: '네코가 붉은 절벽 아래 매복 자리를 먼저 찾아낸다.', item: '붉은 돌조각', damage: 3 },
+  { title: '낡은역참 보급 상자', text: '역참 기둥 뒤에 숨겨진 보급 상자를 열었다.', item: '역참 보급표' },
+  { title: '안개벌판 접속음', text: '안개 속 접속음의 방향을 따라가 잃어버린 돈주머니를 찾았다.', item: '흐린 접속패', damage: 4 },
+  { title: '검은고성터 문양', text: '무너진 성벽의 문양이 고성 파수장의 약점을 가리킨다.', item: '고성 문양 탁본', trust: 2 },
+  { title: '유리폐허 반사광', text: '깨진 돌의 반사광 속에서 숨은 통로의 방향을 읽었다.', item: '유리 파편 지도' },
+  { title: '별무덤 이름표', text: '사라진 유저의 이름표를 정리하자 주변 유저들이 조용히 고개를 끄덕인다.', item: '낡은 이름표', trust: 2, damage: 5 },
+  { title: '무한전선 깃발 흔적', text: '전선 끝에 꽂힌 찢어진 깃발에서 다음 장의 좌표를 읽었다.', item: '찢어진 전선 깃발', trust: 2, damage: 6 }
+];
+
 let connected = false;
 let history = [];
 let historyIndex = 0;
@@ -398,6 +424,7 @@ let autoBusy = false;
 let autoRoomActions = 0;
 let autoRoomCommands = [];
 let visitedRooms = new Set([roomName]);
+let resolvedEvents = new Set();
 let lastSpeaker = names[0];
 let nekoInteractionId = null;
 let choiceSlots = [];
@@ -573,6 +600,41 @@ function canShopHere() {
   return roomName === '장터' || frontierSpecial(roomName)?.type === 'shop';
 }
 
+function roomEvent(name = roomName) {
+  const local = localEvents[name];
+  if (local) return local;
+  const coord = frontierCoord(name);
+  if (!coord) return null;
+  const region = regionEvents[coord.row - 1];
+  const special = frontierSpecial(name);
+  const depth = coord.row + coord.col;
+  const specialText = {
+    safe: '초소의 접속 기록을 정리하자 주변 지도가 또렷해졌다.',
+    heal: '샘가의 푸른 흔적을 따라가며 상처를 돌본다.',
+    shop: '역참 장부를 맞춰 주고 보급품 위치를 얻었다.',
+    boss: `${special?.label} 주변의 낡은 전투 흔적을 읽었다.`
+  };
+  return {
+    title: special ? `${special.label} 단서` : region.title,
+    text: special ? specialText[special.type] : region.text,
+    exp: 50 + depth * 18,
+    gold: special?.type === 'shop' ? 0 : 20 + depth * 10,
+    item: special ? `${special.label} 기록` : region.item,
+    heal: (region.heal || 0) + (special?.type === 'heal' || special?.type === 'safe' ? 24 : 0),
+    trust: region.trust || (special?.type === 'boss' ? 2 : 0),
+    damage: region.damage || (special?.type === 'boss' ? 6 : 0)
+  };
+}
+
+function eventDone(name = roomName) {
+  return resolvedEvents.has(name);
+}
+
+function eventChoice() {
+  const event = roomEvent();
+  return event && !eventDone() ? { label: `${event.title} 처리`, command: '사건' } : null;
+}
+
 function currentAutoMode() {
   return autoModes[autoModeEl?.value] ? autoModeEl.value : 'story';
 }
@@ -643,6 +705,7 @@ function saveGameState() {
       team,
       teamTrust,
       visitedRooms: Array.from(visitedRooms).filter((name) => rooms[name]),
+      resolvedEvents: Array.from(resolvedEvents).filter((name) => rooms[name]),
       autoMode: currentAutoMode(),
       character: {
         title: character.title,
@@ -680,6 +743,9 @@ function loadGameState() {
     visitedRooms = new Set(saved.visitedRooms.filter((name) => rooms[name]));
   }
   visitedRooms.add(roomName);
+  if (Array.isArray(saved.resolvedEvents)) {
+    resolvedEvents = new Set(saved.resolvedEvents.filter((name) => rooms[name]));
+  }
   if (autoModeEl && autoModes[saved.autoMode]) autoModeEl.value = saved.autoMode;
   if (Array.isArray(saved.team)) {
     team = saved.team.filter((name, index, list) => names.includes(name) && list.indexOf(name) === index).slice(0, 4);
@@ -737,6 +803,7 @@ function renderStatusPanel() {
     `돈: ${character.gold} 전`,
     `위치: ${roomName}`,
     `방문: ${visitedRooms.size}/${Object.keys(rooms).length}`,
+    `사건: ${resolvedEvents.size}/${Object.keys(rooms).length}`,
     ...(roomZoneText() ? [`지역: ${roomZoneText()}`] : []),
     `팀: ${teamLabel()}`,
     `자동 목표: ${autoModes[currentAutoMode()]}`,
@@ -1007,10 +1074,49 @@ function welcome() {
   showChoices();
 }
 
+function resolveRoomEvent() {
+  const event = roomEvent();
+  if (!event) {
+    append('이곳에는 처리할 장소 사건이 없습니다.');
+    showChoices();
+    return;
+  }
+  if (eventDone()) {
+    append(`[장소 사건]\n${event.title}은(는) 이미 해결했습니다.`, 'choice');
+    showChoices();
+    return;
+  }
+
+  resolvedEvents.add(roomName);
+  append(`\n[장소 사건]\n${event.title}\n${event.text}`, 'choice');
+  if (event.damage) {
+    const damage = Math.max(1, event.damage - teamPower().scout);
+    character.hp = Math.max(1, character.hp - damage);
+    append(`위험 처리: HP ${damage} 감소. 현재 HP ${character.hp}/${character.hpMax}`, 'choice');
+  }
+  if (event.exp) character.exp += event.exp;
+  if (event.gold) character.gold += event.gold;
+  if (event.item && !hasItem(event.item)) {
+    addItem(event.item);
+    append(`획득 물품: ${event.item}`, 'ally');
+  }
+  if (event.heal) healCharacter(event.heal, event.title, 'ally');
+  if (event.trust && team.length) {
+    raiseTeamTrust(event.trust);
+    append(`[팀 신뢰] ${team.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
+  }
+  append(`사건 보상: 경험 ${event.exp || 0}, 돈 ${event.gold || 0} 전`, 'choice');
+  autoLevelUp('장소 사건');
+  commitProgress();
+  showChoices();
+}
+
 function inspectRoom() {
   const npcs = roomNpcs[roomName] || [];
   const encounters = encountersForRoom(roomName);
-  append(`\n[조사]\n${rooms[roomName].desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n임무 힌트: ${currentQuest().hint}`, 'room');
+  const event = roomEvent();
+  const eventText = event ? `${event.title}${eventDone() ? ' (해결됨)' : ' - "사건"으로 처리'}` : '없음';
+  append(`\n[조사]\n${rooms[roomName].desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n장소 사건: ${eventText}\n임무 힌트: ${currentQuest().hint}`, 'room');
   if (roomName === '북문' && character.storyStep === 5) {
     addItem('북문 경비의 표식');
     setStoryStep(6, '북문 조사를 마쳤다. 북문 밖 숲으로 나가 새 발자국을 확인하자.');
@@ -1219,7 +1325,7 @@ function fallbackNeko(question = '') {
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/장비|착용|무기/.test(q)) return '장터에서 청동검, 가죽갑옷, 수련 부적을 살 수 있어. 산 다음 "착용 장비명", 더 키울 때는 "강화 무기"라고 해.';
   if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
-  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 착용 청동검, 강화 무기, 자동목표 탐험, 이동 장소를 쓸 수 있어.';
+  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 착용 청동검, 강화 무기, 자동목표 탐험, 이동 장소를 쓸 수 있어.';
   if (/회복|피|HP|hp|죽/.test(q)) return 'HP가 낮으면 "회복"이라고 해. 동료와 내가 먼저 돕고, 부족하면 회복약을 써. 장터에서는 "구매 회복약"도 가능해.';
   if (/사람|유저|누구/.test(q)) return `가상 유저 100명이 접속 중이야. 이 방에는 ${roomUsers().slice(0, 6).join(', ')} 등이 있어.`;
   if (/사냥|전투|초보/.test(q)) return '처음이면 수련장으로 가고, 팀을 만든 뒤 북문을 지나 초보사냥터로 가면 안전해.';
@@ -1244,7 +1350,7 @@ function buildSystemInstruction() {
     `소지품: ${character.inventory.join(', ')}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -1406,6 +1512,7 @@ function bestAutoMoveChoice() {
 function makeChoices() {
   const room = rooms[roomName];
   const candidate = roomUsers().find((name) => !team.includes(name)) || roomUsers()[0];
+  const event = eventChoice();
   const combat = encountersForRoom(roomName).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null;
   const heal = character.hp < character.hpMax ? { label: 'HP 회복', command: '회복' } : null;
   const shop = canShopHere() ? { label: '회복약 구매', command: '구매 회복약' } : null;
@@ -1414,6 +1521,7 @@ function makeChoices() {
   const raw = [
     storyChoice(),
     heal,
+    event,
     { label: '주변 조사', command: '조사' },
     shop,
     combat,
@@ -1431,6 +1539,7 @@ function makeChoices() {
 function autoAlternatives() {
   const candidate = roomUsers().find((name) => !team.includes(name)) || roomUsers()[0];
   return [
+    eventChoice(),
     bestAutoTeamChoice(),
     bestAutoGearChoice(),
     { label: '주변 조사', command: '조사' },
@@ -1455,6 +1564,7 @@ function bestAutoChoice() {
   const mode = currentAutoMode();
   const storyPlan = storyChoice();
   const combatPlan = choices.find((choice) => choice.command === '사냥');
+  const eventPlan = eventChoice();
   const gearPlan = bestAutoGearChoice();
   const teamPlan = bestAutoTeamChoice();
   const explorePlan = bestAutoExploreChoice();
@@ -1467,13 +1577,14 @@ function bestAutoChoice() {
       : { label: '수련장으로 이동', command: moveCommandToward('수련장') };
   }
   if (mode === 'story' && storyPlan.command !== '임무') return storyPlan;
-  if (mode === 'hunt') return combatPlan || explorePlan || gearPlan || storyPlan;
-  if (mode === 'gear') return gearPlan || combatPlan || storyPlan;
-  if (mode === 'safe') return gearPlan || teamPlan || storyPlan || combatPlan;
-  if (mode === 'explore') return explorePlan || storyPlan || combatPlan;
-  if (mode === 'team') return teamPlan || combatPlan || storyPlan;
+  if (mode === 'hunt') return combatPlan || eventPlan || explorePlan || gearPlan || storyPlan;
+  if (mode === 'gear') return gearPlan || eventPlan || combatPlan || storyPlan;
+  if (mode === 'safe') return gearPlan || teamPlan || eventPlan || storyPlan || combatPlan;
+  if (mode === 'explore') return eventPlan || explorePlan || storyPlan || combatPlan;
+  if (mode === 'team') return teamPlan || eventPlan || combatPlan || storyPlan;
   return gearPlan
     || teamPlan
+    || eventPlan
     || explorePlan
     || combatPlan
     || choices.find((choice) => choice.command !== '임무')
@@ -1682,11 +1793,11 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 탐험     자동진행 목표 변경\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험 조사\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 팀\n예) 지도\n예) 자동목표 사냥\n예) 강화 무기\n예) 이동 무한평원 05-05`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 탐험     자동진행 목표 변경\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 팀\n예) 조사\n예) 사건\n예) 자동목표 탐험\n예) 강화 무기\n예) 이동 무한평원 05-05`);
 }
 
 function blueprint() {
-  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 레벨업 → 장비 구매/착용/강화 → 팀 역할 조합 → 무한평원 권역 탐험.\n새 핵심: 자동목표가 스토리, 사냥, 장비, 안전, 탐험, 팀 우선순위를 바꾼다.\n진행 방식: 폐광 입구 → 초입초원 → 표지석 벌판 → 낡은역참 → 검은고성터 → 무한전선.\n확장: 권역, 특수지점, 보스 데이터만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
+  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 레벨업 → 장비 구매/착용/강화 → 팀 역할 조합 → 장소 사건 → 무한평원 권역 탐험.\n새 핵심: 자동목표가 스토리, 사냥, 장비, 안전, 탐험, 팀 우선순위를 바꾼다.\n진행 방식: 폐광 입구 → 초입초원 → 표지석 벌판 → 낡은역참 → 검은고성터 → 무한전선.\n확장: 권역, 특수지점, 사건 데이터만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
 }
 
 function ambientChat() {
@@ -1750,6 +1861,7 @@ async function runCommand(raw) {
   else if (['지도', '맵', 'map'].includes(command)) showMap();
   else if (['보기', 'look', 'l'].includes(command)) look();
   else if (['조사', '검색', 'search'].includes(command)) inspectRoom();
+  else if (['사건', '탐색', 'event'].includes(command)) resolveRoomEvent();
   else if (['대화', 'talk'].includes(command)) talkNpc(body);
   else if (['사냥', '공격', '때려', '쳐', 'attack'].includes(command)) hunt(body);
   else if (command === '수련') trainCharacter();
