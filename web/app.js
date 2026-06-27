@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.15.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.16.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -396,6 +396,8 @@ let autoTimer = null;
 let autoProgress = false;
 let autoBusy = false;
 let autoRoomActions = 0;
+let autoRoomCommands = [];
+let visitedRooms = new Set([roomName]);
 let lastSpeaker = names[0];
 let nekoInteractionId = null;
 let choiceSlots = [];
@@ -630,6 +632,7 @@ function saveGameState() {
       roomName,
       team,
       teamTrust,
+      visitedRooms: Array.from(visitedRooms).filter((name) => rooms[name]),
       autoMode: currentAutoMode(),
       character: {
         title: character.title,
@@ -663,6 +666,10 @@ function loadGameState() {
     return;
   }
   if (rooms[saved.roomName]) roomName = saved.roomName;
+  if (Array.isArray(saved.visitedRooms)) {
+    visitedRooms = new Set(saved.visitedRooms.filter((name) => rooms[name]));
+  }
+  visitedRooms.add(roomName);
   if (autoModeEl && autoModes[saved.autoMode]) autoModeEl.value = saved.autoMode;
   if (Array.isArray(saved.team)) {
     team = saved.team.filter((name, index, list) => names.includes(name) && list.indexOf(name) === index).slice(0, 4);
@@ -719,6 +726,7 @@ function renderStatusPanel() {
     `EXP: ${character.exp}/${character.expToLevel}`,
     `돈: ${character.gold} 전`,
     `위치: ${roomName}`,
+    `방문: ${visitedRooms.size}/${Object.keys(rooms).length}`,
     ...(roomZoneText() ? [`지역: ${roomZoneText()}`] : []),
     `팀: ${teamLabel()}`,
     `자동 목표: ${autoModes[currentAutoMode()]}`,
@@ -1377,12 +1385,14 @@ function bestAutoMoveChoice() {
   const exits = rooms[roomName].exits || [];
   if (!exits.length) return null;
   const coord = frontierCoord(roomName);
+  const unvisitedExits = exits.filter((exit) => !visitedRooms.has(exit));
+  const candidates = unvisitedExits.length ? unvisitedExits : exits;
   const nextRoom = coord
-    ? exits.find((exit) => {
+    ? candidates.find((exit) => {
       const next = frontierCoord(exit);
       return next && next.row + next.col > coord.row + coord.col;
-    }) || exits.find((exit) => frontierCoord(exit)) || exits[0]
-    : exits[0];
+    }) || candidates.find((exit) => frontierCoord(exit)) || candidates[0]
+    : candidates[0];
   return { label: `${nextRoom}(으)로 이동`, command: `이동 ${nextRoom}` };
 }
 
@@ -1393,20 +1403,44 @@ function makeChoices() {
   const heal = character.hp < character.hpMax ? { label: 'HP 회복', command: '회복' } : null;
   const shop = canShopHere() ? { label: '회복약 구매', command: '구매 회복약' } : null;
   const upgrade = canShopHere() ? { label: '무기 강화', command: '강화 무기' } : null;
+  const nextExit = room.exits.find((exit) => !visitedRooms.has(exit)) || room.exits[0] || roomName;
   const raw = [
     storyChoice(),
     heal,
+    { label: '주변 조사', command: '조사' },
     shop,
     combat,
     roomName === '수련장' ? { label: '수련하기', command: '수련' } : null,
     canShopHere() ? { label: '청동검 구매', command: '구매 청동검' } : null,
     upgrade,
-    { label: `${room.exits[0] || roomName}(으)로 이동`, command: `이동 ${room.exits[0] || roomName}` },
+    { label: `${nextExit}(으)로 이동`, command: `이동 ${nextExit}` },
     { label: `${candidate}에게 말 걸기`, command: `귓 ${candidate} 여기서 무엇을 조심해야 해?` },
     { label: `${candidate} 팀 영입`, command: `팀 ${candidate}` },
     { label: '네코에게 다음 수 묻기', command: '네코 지금 무엇을 하면 좋을까?' }
   ].filter(Boolean);
   return raw.filter((choice, index, list) => list.findIndex((item) => item.command === choice.command) === index).slice(0, 4);
+}
+
+function autoAlternatives() {
+  const candidate = roomUsers().find((name) => !team.includes(name)) || roomUsers()[0];
+  return [
+    bestAutoTeamChoice(),
+    bestAutoGearChoice(),
+    { label: '주변 조사', command: '조사' },
+    encountersForRoom(roomName).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null,
+    roomName === '수련장' ? { label: '수련하기', command: '수련' } : null,
+    canShopHere() ? { label: '무기 강화', command: '강화 무기' } : null,
+    canShopHere() ? { label: '회복약 보충', command: '구매 회복약' } : null,
+    candidate ? { label: `${candidate}에게 말 걸기`, command: `귓 ${candidate} 여기서 무엇을 조심해야 해?` } : null
+  ].filter(Boolean).filter((choice, index, list) => (
+    !choice.command.startsWith('이동 ') && list.findIndex((item) => item.command === choice.command) === index
+  ));
+}
+
+function freshAutoChoice(choice) {
+  if (choice?.command === '회복') return choice;
+  if (!choice || choice.command.startsWith('이동 ') || !autoRoomCommands.includes(choice.command)) return choice;
+  return autoAlternatives().find((item) => !autoRoomCommands.includes(item.command)) || choice;
 }
 
 function bestAutoChoice() {
@@ -1453,14 +1487,20 @@ function setAutoButton() {
 async function autoTick() {
   if (!connected || !autoProgress || autoBusy) return;
   const forcedMove = autoRoomActions >= 2 ? bestAutoMoveChoice() : null;
-  const choice = forcedMove || bestAutoChoice();
+  const choice = forcedMove || freshAutoChoice(bestAutoChoice());
   if (!choice) return;
   autoBusy = true;
   const beforeRoom = roomName;
   append(`\n[자동 진행]\n${forcedMove ? '장소 행동 2회 완료. ' : ''}네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
   try {
     await runCommand(choice.command);
-    autoRoomActions = choice.command.startsWith('이동 ') || roomName !== beforeRoom ? 0 : autoRoomActions + 1;
+    if (choice.command.startsWith('이동 ') || roomName !== beforeRoom) {
+      autoRoomActions = 0;
+      autoRoomCommands = [];
+    } else {
+      autoRoomActions += 1;
+      autoRoomCommands.push(choice.command);
+    }
   } finally {
     autoBusy = false;
   }
@@ -1474,6 +1514,7 @@ function setAutoProgress(value) {
   }
   if (autoProgress && connected) {
     autoRoomActions = 0;
+    autoRoomCommands = [];
     autoTimer = window.setInterval(autoTick, nekoProfile().autoDelay);
     appendNeko('자동 진행을 시작할게. 위험하면 언제든 다시 눌러서 멈춰.');
   } else if (connected) {
@@ -1577,7 +1618,9 @@ function move(destination) {
   }
 
   roomName = target;
+  visitedRooms.add(roomName);
   autoRoomActions = 0;
+  autoRoomCommands = [];
   commitProgress();
   append(`${roomName}(으)로 이동했다.`);
   if (team.length) append(`${team.join(', ')}: 같이 이동했어.`);

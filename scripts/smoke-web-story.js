@@ -160,9 +160,13 @@ async function submit(command) {
   if (!elements.statusPanel.textContent.includes('자동 목표: 사냥 우선')) throw new Error('자동 목표 변경 실패');
   await submit('자동');
   if (!elements.statusPanel.textContent.includes('자동 진행: 켜짐')) throw new Error('자동 진행 상태 표시 실패');
+  const beforeAuto = screenText();
   await context.autoTick();
   await context.autoTick();
+  const autoLog = screenText().slice(beforeAuto.length);
   if (!screenText().includes('[팀 신뢰]')) throw new Error('자동 사냥 실행 실패');
+  if ((autoLog.match(/=> 사냥/g) || []).length > 1) throw new Error('자동 진행이 같은 방에서 사냥만 반복함');
+  if (!/=> (회복|팀|조사|귓|강화|구매|수련)/.test(autoLog)) throw new Error('자동 진행 대체 행동 선택 실패');
   await context.autoTick();
   if (elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('자동 진행 장소 2회 제한 이동 실패');
   if (!screenText().includes('장소 행동 2회 완료')) throw new Error('자동 진행 강제 이동 안내 실패');
