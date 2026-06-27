@@ -86,6 +86,8 @@ async function submit(command) {
 
 (async () => {
   elements.gameConnect.listeners.click();
+  await submit('지도');
+  if (!screenText().includes('[지도]') || !screenText().includes('[중앙광장]')) throw new Error('지도 표시 실패');
   await submit('팀 검객루안');
   if (!elements.statusPanel.textContent.includes('팀: 검객루안')) throw new Error('팀 영입 실패');
   await submit('팀교체 검객루안 달빛상인');
