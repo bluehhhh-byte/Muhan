@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.24.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.25.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -352,7 +352,7 @@ function monsterLevelFor(room, monster) {
     '폐광 입구': 2
   }[room] || 0;
   const frontierOffset = coord ? Math.floor((coord.row + coord.col - 2) / 4) : 0;
-  const bossOffset = monster.trait === '우두머리' ? 2 : 0;
+  const bossOffset = monster.trait === '우두머리' && coord ? 2 : 0;
   return Math.max(1, character.level + roomOffset + frontierOffset + bossOffset);
 }
 
@@ -390,22 +390,39 @@ function checkLabel(margin) {
 }
 
 function combatDiceResult(monster, attackPower, guardPower, traitDamage, gearEffects) {
-  const rounds = 3;
+  const rounds = 5;
   let totalDamage = 0;
+  let monsterHp = monster.hp;
   const lines = Array.from({ length: rounds }, (_, index) => {
     const heroDice = rollD36Pair();
     const monsterDice = rollD36Pair();
     const heroScore = heroDice.total + Math.floor(attackPower / 3) + (index === 0 ? 2 : 0);
-    const monsterScore = monsterDice.total + monster.level * 2 + Math.floor((traitDamage + guardPower) / 3);
+    const monsterScore = monsterDice.total + monster.level * 2 + Math.floor(traitDamage / 2);
     const margin = heroScore - monsterScore;
     const label = checkLabel(margin);
-    const roundDamage = Math.max(0, Math.round(monster.hp * 0.1 + Math.max(0, margin) * 0.6));
+    const roundDamage = label === '실패'
+      ? 0
+      : Math.max(1, Math.round(attackPower * (label === '방어' ? 0.45 : 0.9) + Math.max(0, margin) * 0.7));
     const counter = Math.max(0, Math.round(monster.level + traitDamage + Math.max(0, -margin) * 0.35 - guardPower * 0.35 - gearEffects.damageReduction));
+    monsterHp = Math.max(0, monsterHp - roundDamage);
     totalDamage += counter;
-    return `${index + 1}턴: 주인공 ${heroDice.first}+${heroDice.second}+보정=${heroScore} / 몬스터 ${monsterDice.first}+${monsterDice.second}+보정=${monsterScore} / ${label} / 반격 ${counter} / 피해 ${roundDamage}`;
+    return `${index + 1}턴: 주인공 ${heroDice.first}+${heroDice.second}+보정=${heroScore} / 몬스터 ${monsterDice.first}+${monsterDice.second}+보정=${monsterScore} / ${label} / 몬스터 HP ${monsterHp}/${monster.hp} / 반격 ${counter}`;
   });
+  if (attackPower >= monster.level * 8 && monsterHp > 0) {
+    monsterHp = 0;
+    lines.push('결정타: 전력 차이로 남은 HP를 밀어냈다.');
+  }
+  if (monsterHp > 0 && monsterHp <= Math.ceil(monster.hp * 0.4) && attackPower + guardPower >= monster.level * 6) {
+    monsterHp = 0;
+    lines.push('마무리: 적의 자세가 무너져 끝장을 냈다.');
+  }
   const floorDamage = Math.max(1, Math.ceil(monster.hp * 0.22) + traitDamage - guardPower - gearEffects.damageReduction);
-  return { text: lines.join('\n'), damage: Math.max(1, Math.min(Math.ceil(monster.hp * 0.65), totalDamage || floorDamage)) };
+  return {
+    text: lines.join('\n'),
+    defeated: monsterHp <= 0,
+    monsterHp,
+    damage: Math.max(1, Math.min(Math.ceil(monster.hp * 0.75), totalDamage || floorDamage))
+  };
 }
 
 function encountersForRoom(room = roomName) {
@@ -875,6 +892,10 @@ function equipmentEffects() {
     if (special === '수호') effects.damageReduction += 4;
     if (special === '치명') effects.attackBonus += 5;
     if (special === '예지') effects.damageReduction += 2;
+    if (special === '저주') {
+      effects.damageReduction -= 4;
+      effects.goldRate -= 0.1;
+    }
     return effects;
   }, { afterHeal: 0, goldRate: 1, expRate: 1, damageReduction: 0, attackBonus: 0 });
 }
@@ -1642,26 +1663,27 @@ function forgeItem(input = '') {
 
   const neko = nekoProfile();
   const roll = Math.random() + neko.luck / 120 + ingredients.length * 0.05;
-  const tier = roll >= 1.25 ? '전설' : roll >= 0.95 ? '희귀' : '기묘';
-  const special = pick(['흡혈', '탐욕', '성장', '수호', '치명', '예지']);
+  const cursed = roll < 0.22;
+  const tier = cursed ? '불길한' : roll >= 1.25 ? '전설' : roll >= 0.95 ? '희귀' : '기묘';
+  const special = cursed ? '저주' : pick(['흡혈', '탐욕', '성장', '수호', '치명', '예지']);
   const slot = ingredients.map((item) => itemStats(item).slot).find(Boolean) || pick(['무기', '방어구', '장신구']);
   const base = ingredients.reduce((sum, item) => sum + Math.max(1, equipmentScore(item)), character.level * 3 + neko.luck);
-  const power = Math.max(3, Math.round(base * ({ 기묘: 0.9, 희귀: 1.25, 전설: 1.7 }[tier] || 1) / 7));
+  const power = Math.max(2, Math.round(base * ({ 불길한: 0.55, 기묘: 0.9, 희귀: 1.25, 전설: 1.7 }[tier] || 1) / 7));
   const stats = {
     slot,
     attack: slot === '무기' ? power + 2 : Math.floor(power / 3),
     defense: slot === '방어구' ? power + 2 : Math.floor(power / 3),
     spirit: slot === '장신구' ? power + 2 : Math.floor(power / 3),
-    luck: Math.max(1, Math.floor(neko.luck / 12) + (tier === '전설' ? 5 : tier === '희귀' ? 3 : 1)),
+    luck: cursed ? 0 : Math.max(1, Math.floor(neko.luck / 12) + (tier === '전설' ? 5 : tier === '희귀' ? 3 : 1)),
     special
   };
   const itemName = `${tier} ${special} ${slot} ${Date.now().toString(36).slice(-4)}`;
   ingredients.forEach(removeExactItem);
   customItems[itemName] = stats;
   addItem(itemName);
-  rememberNeko('연성', `${ingredients.join('+')} => ${itemName}`, tier === '전설' ? 4 : tier === '희귀' ? 3 : 2);
+  rememberNeko('연성', `${ingredients.join('+')} => ${itemName}`, cursed ? 1 : tier === '전설' ? 4 : tier === '희귀' ? 3 : 2);
   commitProgress();
-  append(`\n[네코 연성]\n재료: ${ingredients.join(' + ')}\n행운 판정: ${neko.luck} / 결과 ${tier}\n완성: ${itemName} (${itemBonusText(itemName)})\n네코: 완전 안정적인 선택은 아니지만, 이런 도박수가 가끔 판을 뒤집어.`, 'neko');
+  append(`\n[네코 연성]\n재료: ${ingredients.join(' + ')}\n행운 판정: ${neko.luck} / 결과 ${tier}${cursed ? ' / 뒤틀림' : ''}\n완성: ${itemName} (${itemBonusText(itemName)})\n네코: 완전 안정적인 선택은 아니지만, 이런 도박수가 가끔 판을 뒤집어.`, 'neko');
   showChoices();
 }
 
@@ -1759,9 +1781,17 @@ function hunt(input = '') {
     finishRogueRun(false, `${monster.name} 전투`);
     return;
   }
+  if (!dice.defeated) {
+    append(`\n[전투]\n${monster.name} Lv.${monster.level}와 맞섰지만 끝내 쓰러뜨리지 못했습니다.\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 퇴각 각도를 잡아줬다. 보조 +${neko.combat}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터 HP ${dice.monsterHp}/${monster.hp}. 총 피해 ${damage}를 받고 물러났습니다. 보상은 없습니다.`, 'choice');
+    autoRecoverIfCritical();
+    rememberNeko('전투', `${roomName} ${monster.name} 퇴각`, 1);
+    commitProgress();
+    showChoices();
+    return;
+  }
   character.exp += expGain;
   character.gold += goldGain;
-  append(`\n[전투]\n${monster.name} Lv.${monster.level}을(를) 공격했다.\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n주사위 결과로 총 피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
+  append(`\n[전투]\n${monster.name} Lv.${monster.level}을(를) 공격했다.\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터를 쓰러뜨리고 총 피해 ${damage}를 받았다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
   if (team.length) {
     raiseTeamTrust(1);
     append(`[팀 신뢰] ${team.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
@@ -2024,7 +2054,7 @@ function bestFrontierMoveChoice() {
 function bestAutoFrontierChoice() {
   if (character.storyStep < 8) return storyChoice();
   if (!rogue.active) return { label: '무한원정 시작', command: '원정' };
-  if (character.hp <= Math.ceil(character.hpMax * 0.45)) return { label: 'HP 회복', command: '회복' };
+  if (character.hp <= Math.ceil(character.hpMax * 0.6)) return { label: 'HP 회복', command: '회복' };
   if (!frontierCoord(roomName)) return bestFrontierMoveChoice();
   const node = rogueNodeType();
   if (node === '상점') return bestAutoGearChoice() || eventChoice() || bestFrontierMoveChoice();
@@ -2120,7 +2150,7 @@ function bestAutoChoice() {
   const gearPlan = bestAutoGearChoice();
   const teamPlan = bestAutoTeamChoice();
   const explorePlan = bestAutoExploreChoice();
-  if (character.hp <= Math.ceil(character.hpMax * 0.45)) {
+  if (character.hp <= Math.ceil(character.hpMax * 0.6)) {
     return { label: 'HP 회복', command: '회복' };
   }
   if (character.storyStep === 3 && character.level < 2) {
