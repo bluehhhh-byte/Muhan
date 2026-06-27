@@ -3,9 +3,10 @@
 const MAX_LINES = 700;
 const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
+const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.19.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.20.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -27,6 +28,10 @@ const fields = {
   model: document.getElementById('geminiModel'),
   gender: document.getElementById('nekoGender'),
   tone: document.getElementById('nekoTone'),
+  personality: document.getElementById('nekoPersonality'),
+  role: document.getElementById('nekoRole'),
+  risk: document.getElementById('nekoRisk'),
+  memoryMode: document.getElementById('nekoMemoryMode'),
   level: document.getElementById('nekoLevel'),
   ability: document.getElementById('nekoAbility'),
   prompt: document.getElementById('nekoPrompt')
@@ -391,6 +396,10 @@ const reactionChatter = [
 const randomSettings = {
   gender: ['검은 고양이', '여성 목소리의 고양이', '소년 같은 검은 고양이', '성별을 알 수 없는 신비한 고양이'],
   tone: ['상냥하고 짧게 말함', '장난스럽지만 핵심을 찌름', '무협 사부처럼 말함', 'PC통신 운영자처럼 담백함'],
+  personality: ['차분한 분석가', '장난스러운 동료', '냉정한 전술가', '다정한 보호자'],
+  role: ['길잡이', '전술가', '수호자', '치유사', '상인'],
+  risk: ['균형', '안전', '공격'],
+  memoryMode: ['요약 기억', '전투 우선', '탐험 우선', '대화 우선'],
   level: ['7', '13', '21', '44', '99'],
   ability: ['길찾기와 명령어 해석', '위험 예지', '가상 유저 설득', '숨겨진 소문 탐지', '전투 전술 조언'],
   prompt: [
@@ -458,6 +467,7 @@ let lastSpeaker = names[0];
 let nekoInteractionId = null;
 let choiceSlots = [];
 const recentPhrases = [];
+let nekoMemory = loadNekoMemory();
 
 function pick(list) {
   return list[Math.floor(Math.random() * list.length)];
@@ -469,6 +479,52 @@ function pickFresh(list) {
   recentPhrases.push(value);
   if (recentPhrases.length > 28) recentPhrases.shift();
   return value;
+}
+
+function defaultNekoMemory() {
+  return { level: 1, exp: 0, conversations: 0, battles: 0, events: 0, expeditions: 0, notes: [] };
+}
+
+function loadNekoMemory() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NEKO_MEMORY_KEY) || '{}');
+    return {
+      ...defaultNekoMemory(),
+      ...saved,
+      notes: Array.isArray(saved.notes) ? saved.notes.slice(0, 8) : []
+    };
+  } catch (error) {
+    return defaultNekoMemory();
+  }
+}
+
+function saveNekoMemory() {
+  try {
+    localStorage.setItem(NEKO_MEMORY_KEY, JSON.stringify(nekoMemory));
+  } catch (error) {
+    // 저장소가 막힌 브라우저에서는 현재 세션 기억만 쓴다.
+  }
+}
+
+function rememberNeko(kind, note = '', amount = 1) {
+  const key = { 대화: 'conversations', 전투: 'battles', 사건: 'events', 원정: 'expeditions' }[kind];
+  const mode = fields.memoryMode?.value || '요약 기억';
+  if ((mode === '전투 우선' && kind === '전투') || (mode === '탐험 우선' && kind === '원정') || (mode === '대화 우선' && kind === '대화')) amount += 1;
+  if (key) nekoMemory[key] += 1;
+  nekoMemory.exp += amount;
+  nekoMemory.level = 1 + Math.floor(nekoMemory.exp / 8);
+  const text = `${kind}: ${note}`.slice(0, 70);
+  if (note && !nekoMemory.notes.includes(text)) nekoMemory.notes.unshift(text);
+  nekoMemory.notes = nekoMemory.notes.slice(0, 8);
+  saveNekoMemory();
+}
+
+function nekoMemoryText() {
+  return [
+    `지능 Lv.${nekoMemory.level}, 학습 ${nekoMemory.exp}`,
+    `대화 ${nekoMemory.conversations}, 전투 ${nekoMemory.battles}, 사건 ${nekoMemory.events}, 원정 ${nekoMemory.expeditions}`,
+    `최근 기억: ${nekoMemory.notes.join(' / ') || '없음'}`
+  ].join('\n');
 }
 
 function catalogItem(catalog, name) {
@@ -592,6 +648,7 @@ function startRogueRun() {
   append(`[무한원정]\n${rogue.runs}번째 원정을 시작합니다. 깊이 들어갈수록 유물은 강해지고 저주는 무거워집니다.\n탈출 명령: 원정종료 / 탈출`, 'choice');
   grantRogueRelic('출발 보급');
   enterRogueRoom();
+  rememberNeko('원정', `${rogue.runs}번째 원정 시작`, 2);
   commitProgress();
   showChoices();
 }
@@ -622,6 +679,7 @@ function finishRogueRun(success = false, reason = '탈출') {
   }
   character.hp = Math.max(character.hp, Math.ceil(character.hpMax * 0.5));
   append(`[무한원정 종료]\n사유: ${reason}\n도달 깊이 ${finishedDepth}, 처치 ${finishedKills}. 무한 파편 ${earned}개를 회수했습니다.`, 'choice');
+  rememberNeko('원정', `깊이 ${finishedDepth} / 처치 ${finishedKills}`, 3);
   commitProgress();
   showChoices();
 }
@@ -891,12 +949,15 @@ function nekoProfile() {
   const settings = currentSettings();
   const level = Math.max(1, Math.min(99, Number(settings.level) || 1));
   const ability = settings.ability || '길찾기와 명령어 해석';
-  const combat = 2 + Math.floor(level / 8) + (/전투|전술|공격/.test(ability) ? 4 : 0);
-  const guard = Math.floor(level / 15) + (/위험|예지|생존/.test(ability) ? 3 : 0);
-  const growthRate = 1 + Math.min(0.7, level / 100) + (/전투|수련|성장/.test(ability) ? 0.15 : 0);
-  const goldRate = 1 + Math.min(0.35, level / 180) + (/소문|탐지|상인/.test(ability) ? 0.15 : 0);
-  const autoDelay = /길찾기|명령어|예지/.test(ability) ? 3200 : 4200;
-  return { level, ability, combat, guard, growthRate, goldRate, autoDelay };
+  const role = settings.role || '길잡이';
+  const risk = settings.risk || '균형';
+  const memoryBonus = Math.min(6, Math.floor(nekoMemory.level / 3));
+  const combat = 2 + Math.floor(level / 8) + memoryBonus + (/전투|전술|공격/.test(ability) || role === '전술가' ? 4 : 0);
+  const guard = Math.floor(level / 15) + Math.floor(memoryBonus / 2) + (/위험|예지|생존/.test(ability) || role === '수호자' || risk === '안전' ? 3 : 0);
+  const growthRate = 1 + Math.min(0.7, level / 100) + Math.min(0.2, nekoMemory.level / 120) + (/전투|수련|성장/.test(ability) ? 0.15 : 0);
+  const goldRate = 1 + Math.min(0.35, level / 180) + (/소문|탐지|상인/.test(ability) || role === '상인' ? 0.15 : 0);
+  const autoDelay = /길찾기|명령어|예지/.test(ability) || role === '길잡이' ? 3200 : risk === '공격' ? 3000 : 4200;
+  return { level, ability, role, risk, combat, guard, growthRate, goldRate, autoDelay };
 }
 
 function saveGameState() {
@@ -1059,9 +1120,13 @@ function renderStatusPanel() {
     '[네코]',
     `레벨: ${neko.level}`,
     `능력: ${neko.ability}`,
+    `역할: ${neko.role} / 위험 ${neko.risk}`,
     `전투 보조: +${neko.combat}`,
     `성장 보정: x${neko.growthRate.toFixed(2)}`,
     `자동 진행: ${autoProgress ? '켜짐' : '꺼짐'}`,
+    '',
+    '[네코 지식]',
+    nekoMemoryText(),
     '',
     '[장비]',
     ...Object.entries(character.equipment).map(([slot, item]) => `${slot}: ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}`),
@@ -1138,7 +1203,8 @@ function healCharacter(amount, source, className = 'ally') {
 function nekoHeal() {
   const neko = nekoProfile();
   const abilityBonus = /회복|치유|생존|위험|예지/.test(neko.ability) ? 8 : 0;
-  const amount = Math.round(character.hpMax * 0.22) + Math.floor(neko.level / 6) + character.spirit + abilityBonus;
+  const roleBonus = neko.role === '치유사' ? 10 : 0;
+  const amount = Math.round(character.hpMax * 0.22) + Math.floor(neko.level / 6) + Math.floor(nekoMemory.level / 4) + character.spirit + abilityBonus + roleBonus;
   return healCharacter(Math.max(5, amount), '네코가 푸른 숨결로 상처를 핥았다', 'neko');
 }
 
@@ -1247,7 +1313,7 @@ function saveSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(currentSettings()));
   nekoInteractionId = null;
   setGeminiStatus('저장됨');
-  append('설정이 저장되었습니다. 네코의 대화 기억을 새로 시작합니다.');
+  append('설정이 저장되었습니다. 네코의 대화 연결만 새로 시작하고 축적 지식은 유지합니다.');
   if (autoProgress) setAutoProgress(true);
   else renderStatusPanel();
 }
@@ -1257,6 +1323,10 @@ function loadSettings() {
     model: DEFAULT_MODEL,
     gender: '검은 고양이',
     tone: '상냥하고 짧게 말함',
+    personality: '차분한 분석가',
+    role: '길잡이',
+    risk: '균형',
+    memoryMode: '요약 기억',
     level: '7',
     ability: '길찾기와 명령어 해석',
     prompt: randomSettings.prompt[0]
@@ -1273,6 +1343,10 @@ function loadSettings() {
 function makeRandomSettings() {
   fields.gender.value = pick(randomSettings.gender);
   fields.tone.value = pick(randomSettings.tone);
+  fields.personality.value = pick(randomSettings.personality);
+  fields.role.value = pick(randomSettings.role);
+  fields.risk.value = pick(randomSettings.risk);
+  fields.memoryMode.value = pick(randomSettings.memoryMode);
   fields.level.value = pick(randomSettings.level);
   fields.ability.value = pick(randomSettings.ability);
   fields.prompt.value = pick(randomSettings.prompt);
@@ -1360,6 +1434,7 @@ function resolveRoomEvent() {
     append(`[팀 신뢰] ${team.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
   }
   append(`사건 보상: 경험 ${event.exp || 0}, 돈 ${goldGain} 전`, 'choice');
+  rememberNeko('사건', `${roomName} ${event.title}`, 2);
   autoLevelUp('장소 사건');
   commitProgress();
   showChoices();
@@ -1436,6 +1511,11 @@ function showScore() {
   renderStatusPanel();
   const stats = effectiveStats();
   append(`\n[점수]\n${character.title} ${character.name} / 레벨 ${character.level} ${character.job}\nHP ${character.hp}/${character.hpMax}  MP ${character.mp}/${character.mpMax}\n공격 ${stats.attack}  방어 ${stats.defense}  정신 ${stats.spirit}\n강화 무기 +${character.upgrades.무기} / 방어구 +${character.upgrades.방어구} / 장신구 +${character.upgrades.장신구}\nEXP ${character.exp}/${character.expToLevel}  돈 ${character.gold} 전\n현재 임무: ${currentQuest().title}`);
+}
+
+function showNekoMemory() {
+  append(`\n[네코 지식]\n${nekoMemoryText()}`, 'neko');
+  showChoices();
 }
 
 function useItem(input = '') {
@@ -1542,6 +1622,7 @@ function hunt(input = '') {
     append(`획득 물품: ${monster.item}`, 'ally');
   }
   recordRogueCombat(monster);
+  rememberNeko('전투', `${roomName} ${monster.name}`, 2);
   autoLevelUp('전투 경험');
   if (character.storyStep === 2) {
     setStoryStep(3, '증거를 얻었다. 수련장으로 가서 레벨을 올리자.');
@@ -1579,6 +1660,7 @@ function trainCharacter() {
 
 function fallbackNeko(question = '') {
   const q = question.trim();
+  if (/기억|학습|지능|진화/.test(q)) return `내 지식은 Lv.${nekoMemory.level}이야. ${nekoMemory.notes[0] ? `최근엔 ${nekoMemory.notes[0]}을 기억해.` : '아직 쌓인 기억은 적어.'}`;
   if (/원정|로그|유물|저주|깊이|파편/.test(q)) return rogue.active
     ? `무한원정 진행 중이야. 깊이 ${rogue.depth}, 유물 ${rogue.relics.length}개, 저주 ${rogue.curses.length}개야. 위험하면 "원정종료"로 빠져.`
     : '무한평원에서 "원정"을 입력하면 로그라이크식 무한원정을 시작해. 유물은 강해지고, 깊이 5마다 저주가 붙어.';
@@ -1602,6 +1684,10 @@ function buildSystemInstruction() {
     '너는 한국 PC통신 MUD "무한대전" 안에서 주인공 옆을 따라다니는 검은 고양이 네코다.',
     `성별/정체성: ${settings.gender}`,
     `말투: ${settings.tone}`,
+    `성격: ${settings.personality}`,
+    `역할: ${settings.role}`,
+    `위험 성향: ${settings.risk}`,
+    `학습 방식: ${settings.memoryMode}`,
     `레벨: ${settings.level}`,
     `특수능력: ${settings.ability}`,
     `추가 설정: ${settings.prompt}`,
@@ -1613,7 +1699,9 @@ function buildSystemInstruction() {
     `현재 임무: ${currentQuest().title} - ${currentQuest().goal}`,
     `소지품: ${character.inventory.join(', ')}`,
     `무한원정: ${rogue.active ? `진행 중, 깊이 ${rogue.depth}, 유물 ${rogue.relics.join(', ') || '없음'}, 저주 ${rogue.curses.join(', ') || '없음'}` : `대기, 역대 최고 깊이 ${rogue.bestDepth}, 파편 ${rogue.fragments}`}`,
+    `축적 지식: ${nekoMemoryText()}`,
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
+    '축적 지식과 최근 기억을 근거로 다음 행동을 더 똑똑하게 추천한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
     '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
@@ -1951,10 +2039,15 @@ async function askNeko(question = '') {
   try {
     const data = await requestNeko(input, nekoInteractionId);
     if (data.id) nekoInteractionId = data.id;
-    appendNeko(data.text || fallbackNeko(input));
+    const answer = data.text || fallbackNeko(input);
+    appendNeko(answer);
+    rememberNeko('대화', input, 1);
+    renderStatusPanel();
   } catch (error) {
     appendNeko(`Gemini 연결 실패. ${error.message}`);
     appendNeko(fallbackNeko(input));
+    rememberNeko('대화', input, 1);
+    renderStatusPanel();
   }
   showChoices();
 }
@@ -2097,7 +2190,7 @@ function clearTeam() {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 원정\n예) 사건\n예) 자동목표 무한평원\n예) 강화 무기\n예) 이동 무한평원 05-05`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              가상 유저 100명 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 원정\n예) 네코기억\n예) 자동목표 무한평원\n예) 강화 무기\n예) 이동 무한평원 05-05`);
 }
 
 function blueprint() {
@@ -2178,6 +2271,7 @@ async function runCommand(raw) {
   else if (['강화', '업그레이드', 'upgrade'].includes(command)) upgradeEquipment(body);
   else if (['소지품', '소지', 'inventory'].includes(command)) showInventory();
   else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();
+  else if (['네코기억', '기억', '학습'].includes(command)) showNekoMemory();
   else if (['사용', '마셔', '먹어'].includes(command)) useItem(body);
   else if (['자동', 'auto'].includes(command)) setAutoProgress(!autoProgress);
   else if (['자동목표', '목표', 'mode'].includes(command)) setAutoMode(body);

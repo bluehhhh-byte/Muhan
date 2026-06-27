@@ -36,7 +36,8 @@ const ids = [
   'status', 'diagnostics', 'gameScreen', 'statusPanel', 'gameCommand', 'gameForm',
   'gameConnect', 'gameDisconnect', 'gameSend', 'gameClear', 'gameEnter',
   'gameAuto', 'autoMode', 'autoScroll', 'geminiTestStatus', 'geminiModel', 'nekoGender',
-  'nekoTone', 'nekoLevel', 'nekoAbility', 'nekoPrompt', 'saveSettings',
+  'nekoTone', 'nekoPersonality', 'nekoRole', 'nekoRisk', 'nekoMemoryMode',
+  'nekoLevel', 'nekoAbility', 'nekoPrompt', 'saveSettings',
   'randomSettings', 'testGemini'
 ];
 const elements = Object.fromEntries(ids.map((id) => [id, makeElement(id)]));
@@ -44,6 +45,10 @@ elements.geminiModel.value = 'gemini-3.1-flash-lite';
 elements.autoMode.value = 'story';
 elements.nekoGender.value = '검은 고양이';
 elements.nekoTone.value = '짧게';
+elements.nekoPersonality.value = '차분한 분석가';
+elements.nekoRole.value = '길잡이';
+elements.nekoRisk.value = '균형';
+elements.nekoMemoryMode.value = '요약 기억';
 elements.nekoLevel.value = '7';
 elements.nekoAbility.value = '길찾기';
 elements.nekoPrompt.value = '테스트';
@@ -115,6 +120,7 @@ async function submit(command) {
   if (!screenText().includes('[전투]')) throw new Error('추천 선택으로 전투가 실행되지 않음');
   if (!screenText().includes('네코가 앞발로 빈틈을 만들었다')) throw new Error('네코 전투 참여 문구가 없음');
   if (!screenText().includes('[팀 신뢰]') || !elements.statusPanel.textContent.includes('[팀 신뢰]')) throw new Error('팀 신뢰도 상승 실패');
+  if (!elements.statusPanel.textContent.includes('[네코 지식]') || !elements.statusPanel.textContent.includes('전투 1')) throw new Error('네코 전투 기억 누적 실패');
   if (!elements.statusPanel.textContent.includes('첫 수련')) throw new Error('전투 이후 첫 수련 임무로 진행되지 않음');
   await submit('사냥');
   await submit('사냥');
