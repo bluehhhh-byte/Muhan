@@ -109,9 +109,11 @@ async function submit(command) {
   await submit('1');
   await submit('1');
   if (!elements.statusPanel.textContent.includes('위치: 초보사냥터')) throw new Error('추천 이동으로 초보사냥터 도착 실패');
+  await submit('팀 검객루안');
   await submit('1');
   if (!screenText().includes('[전투]')) throw new Error('추천 선택으로 전투가 실행되지 않음');
   if (!screenText().includes('네코가 앞발로 빈틈을 만들었다')) throw new Error('네코 전투 참여 문구가 없음');
+  if (!screenText().includes('[팀 신뢰]') || !elements.statusPanel.textContent.includes('[팀 신뢰]')) throw new Error('팀 신뢰도 상승 실패');
   if (!elements.statusPanel.textContent.includes('첫 수련')) throw new Error('전투 이후 첫 수련 임무로 진행되지 않음');
   await submit('사냥');
   await submit('사냥');

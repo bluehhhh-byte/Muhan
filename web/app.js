@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.12.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.13.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -378,6 +378,7 @@ let history = [];
 let historyIndex = 0;
 let roomName = '중앙광장';
 let team = [];
+let teamTrust = {};
 let tickTimer = null;
 let autoTimer = null;
 let autoProgress = false;
@@ -512,15 +513,28 @@ function allyRole(name) {
 function teamPower() {
   return team.reduce((power, name) => {
     const role = allyRole(name);
-    power.attack += role.attack;
-    power.defense += role.defense;
-    power.heal += role.heal;
+    const trustBonus = Math.floor(trustFor(name) / 3);
+    power.attack += role.attack + (role.attack ? trustBonus : 0);
+    power.defense += role.defense + (role.defense ? trustBonus : 0);
+    power.heal += role.heal + (role.heal ? trustBonus : 0);
+    if (role.label === '정찰형') power.scout += 1 + trustBonus;
     return power;
-  }, { attack: 0, defense: 0, heal: 0 });
+  }, { attack: 0, defense: 0, heal: 0, scout: 0 });
 }
 
 function teamLabel() {
-  return team.length ? team.map((name) => `${name}(${allyRole(name).label})`).join(', ') : '없음';
+  return team.length ? team.map((name) => `${name}(${allyRole(name).label}, 신뢰 ${trustFor(name)})`).join(', ') : '없음';
+}
+
+function trustFor(name) {
+  return Math.max(0, Math.min(99, Number(teamTrust[name]) || 0));
+}
+
+function raiseTeamTrust(amount = 1) {
+  if (!team.length) return;
+  team.forEach((name) => {
+    teamTrust[name] = Math.min(99, trustFor(name) + amount);
+  });
 }
 
 function roomZoneText(name = roomName) {
@@ -602,6 +616,7 @@ function saveGameState() {
     localStorage.setItem(GAME_STATE_KEY, JSON.stringify({
       roomName,
       team,
+      teamTrust,
       autoMode: currentAutoMode(),
       character: {
         title: character.title,
@@ -638,6 +653,11 @@ function loadGameState() {
   if (autoModeEl && autoModes[saved.autoMode]) autoModeEl.value = saved.autoMode;
   if (Array.isArray(saved.team)) {
     team = saved.team.filter((name, index, list) => names.includes(name) && list.indexOf(name) === index).slice(0, 4);
+  }
+  if (saved.teamTrust && typeof saved.teamTrust === 'object') {
+    teamTrust = Object.fromEntries(Object.entries(saved.teamTrust)
+      .filter(([name]) => names.includes(name))
+      .map(([name, value]) => [name, Math.max(0, Math.min(99, Number(value) || 0))]));
   }
   if (saved.character && typeof saved.character === 'object') {
     for (const key of ['title', 'level', 'hp', 'hpMax', 'mp', 'mpMax', 'attack', 'defense', 'spirit', 'exp', 'expToLevel', 'gold', 'storyStep']) {
@@ -694,6 +714,11 @@ function renderStatusPanel() {
     currentQuest().title,
     currentQuest().goal,
     '',
+    ...(team.length ? [
+      '[팀 신뢰]',
+      ...team.map((name) => `${name}: ${trustFor(name)} / ${allyRole(name).label}`)
+    ] : []),
+    ...(team.length ? [''] : []),
     '[네코]',
     `레벨: ${neko.level}`,
     `능력: ${neko.ability}`,
@@ -1091,13 +1116,18 @@ function hunt(input = '') {
   const trait = monsterTraits[monster.trait] || {};
   const attackPower = stats.attack + allies.attack + neko.combat;
   const guardPower = stats.defense + allies.defense + neko.guard;
-  const damage = Math.max(1, Math.ceil(monster.hp * 0.45) + (trait.damage || 0) - guardPower);
+  const traitDamage = Math.max(0, (trait.damage || 0) - allies.scout);
+  const damage = Math.max(1, Math.ceil(monster.hp * 0.45) + traitDamage - guardPower);
   const expGain = Math.round(monster.exp * (trait.expRate || 1) * neko.growthRate);
   const goldGain = Math.round(monster.gold * (trait.goldRate || 1) * neko.goldRate);
   character.hp = Math.max(1, character.hp - damage);
   character.exp += expGain;
   character.gold += goldGain;
-  append(`\n[전투]\n${monster.name}을(를) 공격했다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.\n피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
+  append(`\n[전투]\n${monster.name}을(를) 공격했다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n피해 ${damage}를 받았지만 승리했다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
+  if (team.length) {
+    raiseTeamTrust(1);
+    append(`[팀 신뢰] ${team.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
+  }
   autoRecoverIfCritical();
   if (monster.item && !hasItem(monster.item)) {
     addItem(monster.item);
@@ -1523,6 +1553,7 @@ function teamUp(query) {
     return;
   }
   team.push(name);
+  teamTrust[name] = Math.max(1, trustFor(name));
   commitProgress();
   append(`${name}: 좋아, 같이 가자.`, 'ally');
   append(`현재 팀: ${team.join(', ')}`);
@@ -1542,6 +1573,7 @@ function replaceTeamMember(input = '') {
     return;
   }
   team[index] = newName;
+  teamTrust[newName] = Math.max(1, trustFor(newName));
   commitProgress();
   append(`${oldName}이(가) 물러나고 ${newName}이(가) 합류했습니다.`, 'ally');
   append(`현재 팀: ${team.join(', ')}`);
