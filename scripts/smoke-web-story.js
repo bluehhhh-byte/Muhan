@@ -161,8 +161,13 @@ async function submit(command) {
   const gearAutoLog = screenText().slice(beforeGearAuto.length);
   if (!gearAutoLog.includes('=> 착용 광부의 곡괭이')) throw new Error('자동 장비가 더 좋은 곡괭이를 착용하지 않음');
   if (gearAutoLog.includes('=> 착용 청동검')) throw new Error('자동 장비가 청동검으로 되돌아감');
+  await context.autoTick();
+  if (!elements.statusPanel.textContent.includes('위치: 주막')) throw new Error('자동 장비 정비 후 장터를 벗어나지 않음');
+  const beforeShopLoopCheck = screenText();
+  await context.autoTick();
+  await context.autoTick();
+  if (screenText().slice(beforeShopLoopCheck.length).includes('=> 이동 장터')) throw new Error('자동 진행이 주막/장터 왕복을 반복함');
   await submit('자동');
-  await submit('이동 주막');
   await submit('이동 중앙광장');
   await submit('이동 북문');
   await submit('이동 북문 밖 숲');
@@ -174,7 +179,7 @@ async function submit(command) {
   if (!screenText().includes('장소 사건: 평원 초소 단서')) throw new Error('장소 사건 조사 표시 실패');
   await submit('사건');
   if (!screenText().includes('[장소 사건]') || !screenText().includes('사건 보상')) throw new Error('장소 사건 처리 실패');
-  if (!elements.statusPanel.textContent.includes('사건: 1/')) throw new Error('장소 사건 저장 표시 실패');
+  if (!/사건: [1-9]\d*\//.test(elements.statusPanel.textContent)) throw new Error('장소 사건 저장 표시 실패');
   const beforeRepeatEvent = screenText();
   await submit('사건');
   if (!screenText().slice(beforeRepeatEvent.length).includes('이미 해결')) throw new Error('장소 사건 중복 처리 차단 실패');

@@ -5,7 +5,7 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.17.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.17.1';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -423,6 +423,7 @@ let autoProgress = false;
 let autoBusy = false;
 let autoRoomActions = 0;
 let autoRoomCommands = [];
+let autoShopCooldown = 0;
 let visitedRooms = new Set([roomName]);
 let resolvedEvents = new Set();
 let lastSpeaker = names[0];
@@ -598,6 +599,10 @@ function roomZoneText(name = roomName) {
 
 function canShopHere() {
   return roomName === '장터' || frontierSpecial(roomName)?.type === 'shop';
+}
+
+function isShopCommand(command = '') {
+  return /^(구매|구입|사|buy|착용|장착|equip|강화|업그레이드|upgrade)(\s|$)/.test(command);
 }
 
 function roomEvent(name = roomName) {
@@ -1443,6 +1448,7 @@ function bestAutoGearChoice() {
     return isBetterEquipment(item) && !hasItem(item) && character.gold >= shopItems[item].price;
   });
   const canUpgrade = character.equipment.무기 !== '낡은 목검' && character.gold >= upgradeCost('무기');
+  if (autoShopCooldown > 0) return null;
   if ((needsGear || canUpgrade) && !canShopHere()) {
     return { label: '장터에서 장비 정비', command: moveCommandToward('장터') };
   }
@@ -1609,9 +1615,12 @@ async function autoTick() {
   if (!choice) return;
   autoBusy = true;
   const beforeRoom = roomName;
+  const wasShopRoom = canShopHere();
   append(`\n[자동 진행]\n${forcedMove ? '장소 행동 2회 완료. ' : ''}네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
   try {
     await runCommand(choice.command);
+    if (wasShopRoom && isShopCommand(choice.command)) autoShopCooldown = 3;
+    else if (autoShopCooldown > 0) autoShopCooldown -= 1;
     if (choice.command.startsWith('이동 ') || roomName !== beforeRoom) {
       autoRoomActions = 0;
       autoRoomCommands = [];
@@ -1633,6 +1642,7 @@ function setAutoProgress(value) {
   if (autoProgress && connected) {
     autoRoomActions = 0;
     autoRoomCommands = [];
+    autoShopCooldown = 0;
     autoTimer = window.setInterval(autoTick, nekoProfile().autoDelay);
     appendNeko('자동 진행을 시작할게. 위험하면 언제든 다시 눌러서 멈춰.');
   } else if (connected) {
