@@ -106,6 +106,7 @@ async function submit(command) {
   await submit('사회 결혼');
   if (!screenText().includes('[AI 사회]') || !screenText().includes('현재 접속자: 201명')) throw new Error('AI 사회 결혼/증가 사건 실패');
   if (!elements.diagnostics.textContent.includes('AI 유저 201명')) throw new Error('진단창 AI 유저 증가 반영 실패');
+  if (!elements.statusPanel.textContent.includes('[현재상태]') || !elements.statusPanel.textContent.includes('감정: 기쁨')) throw new Error('AI 사회 사건 현재상태 반영 실패');
   await submit('지도');
   if (!screenText().includes('[지도]') || !screenText().includes('[중앙광장]')) throw new Error('지도 표시 실패');
   if (!screenText().includes('표식: S 안전 / $ 상점 / H 회복 / B 보스')) throw new Error('무한평원 지도 표식 실패');
@@ -198,6 +199,7 @@ async function submit(command) {
   await submit('조사');
   if (!elements.statusPanel.textContent.includes('표지석 조사')) throw new Error('평원 진입 이후 표지석 조사 임무 실패');
   if (!elements.statusPanel.textContent.includes('위치: 무한평원 01-01')) throw new Error('확장 지도 진입 실패');
+  if (!screenText().includes('장면:') || !elements.statusPanel.textContent.includes('깨달음:')) throw new Error('무한평원 장면/깨달음 표시 실패');
   if (!screenText().includes('장소 사건: 평원 초소 단서')) throw new Error('장소 사건 조사 표시 실패');
   await submit('사건');
   if (!screenText().includes('[장소 사건]') || !screenText().includes('사건 보상')) throw new Error('장소 사건 처리 실패');
@@ -209,6 +211,8 @@ async function submit(command) {
   if (!screenText().includes('[01-01S]') || !screenText().includes('10-10B')) throw new Error('무한평원 100구역 지도 표시 실패');
   await submit('조사');
   if (!screenText().includes('평원')) throw new Error('무한평원 조우 생성 실패');
+  await submit('사냥 무리');
+  if (!screenText().includes('출현:')) throw new Error('무한평원 복수 몬스터 출현 표시 실패');
   await submit('원정');
   if (!screenText().includes('[무한원정]') || !screenText().includes('[유물]')) throw new Error('무한원정 시작/유물 지급 실패');
   if (!elements.statusPanel.textContent.includes('[무한원정]') || !elements.statusPanel.textContent.includes('상태: 진행 중')) throw new Error('무한원정 상태창 표시 실패');

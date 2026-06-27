@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.26.1';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.27.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -289,6 +289,9 @@ const character = {
   expToLevel: 512,
   gold: 500,
   storyStep: 0,
+  mood: '담담함',
+  insight: '아직 마음에 남은 문장은 없다.',
+  lastScene: '중앙광장의 접속 대기',
   equipment: {
     무기: '낡은 목검',
     방어구: '수련복',
@@ -367,6 +370,28 @@ const frontierMonsterNames = [
   '평원 들개', '떠돌이 검객', '바람 도적', '검은 풀벌레', '낡은 병정',
   '황야 박쥐', '철가면 수색꾼', '초승 늑대', '먼지 정령', '표지석 파수꾼'
 ];
+const frontierPrefixes = ['굶주린', '비에 젖은', '이름 잃은', '분노한', '노래하는', '침묵의', '달빛 아래', '도망친'];
+const frontierScenes = [
+  '낡은 채팅 로그가 풀잎처럼 흩어진다',
+  '먼 곳에서 접속음과 울음소리가 겹친다',
+  '누군가 버린 이름표가 흙에 반쯤 묻혀 있다',
+  '표지석 그림자가 방금 전과 다른 방향을 가리킨다',
+  '네코의 털이 곤두설 만큼 공기가 얇다',
+  '비어 있는 주막 간판이 바람에 혼자 대답한다',
+  '깨진 갑옷 속에서 오래된 감사 인사가 새어 나온다',
+  '발자국 셋이 들어갔는데 둘만 돌아 나온 흔적이 있다'
+];
+const frontierLandmarks = ['흰 억새 언덕', '끊어진 돌다리', '검은 샘', '녹슨 역참 종', '버려진 훈련 말뚝', '푸른 돌무덤', '무너진 통신탑', '아이 이름이 새겨진 표지목'];
+const frontierInsights = [
+  ['불안', '길은 넓어질수록 마음속 빈자리도 드러난다.'],
+  ['기쁨', '함께 버틴 시간은 전리품보다 오래 남는다.'],
+  ['분노', '상처는 힘이 되기도 하지만, 오래 쥐면 손부터 다친다.'],
+  ['슬픔', '사라진 이름을 기억하는 일도 모험의 일부다.'],
+  ['희망', '오늘의 작은 이동이 내일의 지도가 된다.'],
+  ['외로움', '혼자 남겨진 길도 누군가의 발자국 위에 놓여 있다.'],
+  ['행복', '살아남았다는 사실은 때때로 가장 작은 축제다.'],
+  ['절망', '끝을 보았다고 믿는 순간에도 발밑의 흙은 아직 길이다.']
+];
 
 function frontierEncounters(room = roomName) {
   const coord = frontierCoord(room);
@@ -374,8 +399,8 @@ function frontierEncounters(room = roomName) {
   const special = frontierSpecials[room];
   const depth = coord.row + coord.col;
   const base = 22 + depth * 5;
-  const firstName = frontierMonsterNames[(coord.row + coord.col) % frontierMonsterNames.length];
-  const secondName = frontierMonsterNames[(coord.row * 3 + coord.col * 5) % frontierMonsterNames.length];
+  const firstName = `${pick(frontierPrefixes)} ${frontierMonsterNames[(coord.row + coord.col) % frontierMonsterNames.length]}`;
+  const secondName = `${pick(frontierPrefixes)} ${frontierMonsterNames[(coord.row * 3 + coord.col * 5) % frontierMonsterNames.length]}`;
   const traits = Object.keys(monsterTraits);
   const encounters = [
     {
@@ -396,6 +421,73 @@ function frontierEncounters(room = roomName) {
     }
   ];
   return special?.type === 'boss' ? [special.monster].concat(encounters) : encounters;
+}
+
+function frontierSceneText(room = roomName) {
+  const coord = frontierCoord(room);
+  if (!coord) return '';
+  const region = frontierRegion(room);
+  const landmark = pick(frontierLandmarks);
+  const scene = pickFresh(frontierScenes);
+  const depth = coord.row + coord.col - 1;
+  const special = frontierSpecial(room);
+  return `${region.name} ${coord.row}-${coord.col}, ${landmark}. ${scene}. 깊이감 ${depth}${special ? ` / ${special.label}` : ''}`;
+}
+
+function sceneTextForRoom(room = roomName) {
+  return frontierCoord(room) ? frontierSceneText(room) : `${room}: ${rooms[room].desc}`;
+}
+
+function reflect(mood, insight, scene = '') {
+  character.mood = mood || character.mood;
+  character.insight = insight || character.insight;
+  if (scene) character.lastScene = scene;
+}
+
+function chooseEncounter(encounters, input = '') {
+  const query = input.trim();
+  const forceGroup = /무리|떼|다수|여러/.test(query);
+  const named = !forceGroup && encounters.find((item) => query && item.name.includes(query));
+  if (named) return named;
+  if (!frontierCoord(roomName) || encounters.length < 2 || (!forceGroup && Math.random() < 0.45)) return pick(encounters);
+  const count = Math.min(encounters.length, 2 + (Math.random() > 0.72 ? 1 : 0));
+  const group = Array.from({ length: count }, () => pick(encounters));
+  const primary = group[0];
+  return {
+    ...primary,
+    name: `${group.map((monster) => monster.name).join(' + ')} 습격대`,
+    hp: Math.round(group.reduce((sum, monster) => sum + monster.hp, 0) * 0.75),
+    exp: Math.round(group.reduce((sum, monster) => sum + monster.exp, 0) * 0.85),
+    gold: Math.round(group.reduce((sum, monster) => sum + monster.gold, 0) * 0.85),
+    item: group.find((monster) => monster.item)?.item || '',
+    bonusItem: group.find((monster) => monster.bonusItem)?.bonusItem || '',
+    level: Math.max(...group.map((monster) => monster.level || 1)),
+    groupCount: count
+  };
+}
+
+function frontierTwist(monster, defeated) {
+  if (!frontierCoord(roomName) || Math.random() < 0.45) return '';
+  const [mood, insight] = pick(frontierInsights);
+  const scene = frontierSceneText();
+  reflect(mood, insight, scene);
+  if (!defeated) {
+    return `\n[위험상황]\n${scene}\n네코: ${insight}`;
+  }
+  const roll = Math.random();
+  if (roll > 0.66) {
+    const foundGold = 25 + Math.floor((monster.level || character.level) * 4);
+    character.gold += foundGold;
+    return `\n[변수]\n${scene}\n쓰러진 적 뒤에서 오래된 전낭을 찾았다. +${foundGold}전\n네코: ${insight}`;
+  }
+  if (roll > 0.33 && team.length) {
+    raiseTeamTrust(1);
+    return `\n[변수]\n${scene}\n위기를 같이 넘기며 관계가 조금 깊어졌다.\n네코: ${insight}`;
+  }
+  const scratch = Math.min(Math.max(0, character.hp - 1), 3 + rogueDamageBonus());
+  if (scratch > 0) character.hp -= scratch;
+  if (!scratch) return `\n[변수]\n${scene}\n네코가 꼬리로 후퇴 신호를 그어 마지막 피해를 막았다.\n네코: ${insight}`;
+  return `\n[위험상황]\n${scene}\n뒤늦은 매복으로 HP ${scratch} 감소.\n네코: ${insight}`;
 }
 
 function monsterLevelFor(room, monster) {
@@ -1172,6 +1264,9 @@ function saveGameState() {
         expToLevel: character.expToLevel,
         gold: character.gold,
         storyStep: character.storyStep,
+        mood: character.mood,
+        insight: character.insight,
+        lastScene: character.lastScene,
         equipment: character.equipment,
         upgrades: character.upgrades,
         inventory: character.inventory
@@ -1231,7 +1326,7 @@ function loadGameState() {
     rogue.nodes = Array.isArray(saved.rogue.nodes) ? saved.rogue.nodes.filter((name) => rooms[name]) : [];
   }
   if (saved.character && typeof saved.character === 'object') {
-    for (const key of ['title', 'level', 'hp', 'hpMax', 'mp', 'mpMax', 'attack', 'defense', 'spirit', 'exp', 'expToLevel', 'gold', 'storyStep']) {
+    for (const key of ['title', 'level', 'hp', 'hpMax', 'mp', 'mpMax', 'attack', 'defense', 'spirit', 'exp', 'expToLevel', 'gold', 'storyStep', 'mood', 'insight', 'lastScene']) {
       if (saved.character[key] !== undefined) character[key] = saved.character[key];
     }
     if (saved.character.equipment && typeof saved.character.equipment === 'object') character.equipment = saved.character.equipment;
@@ -1281,6 +1376,11 @@ function renderStatusPanel() {
     `사건: ${resolvedEvents.size}/${Object.keys(rooms).length}`,
     `AI 유저: ${names.length}명`,
     ...(roomZoneText() ? [`지역: ${roomZoneText()}`] : []),
+    '',
+    '[현재상태]',
+    `감정: ${character.mood}`,
+    `장면: ${character.lastScene}`,
+    `깨달음: ${character.insight}`,
     `팀: ${teamLabel()}`,
     `자동 목표: ${autoModes[currentAutoMode()]}`,
     '',
@@ -1574,7 +1674,7 @@ function findUser(query) {
 
 function look() {
   const room = rooms[roomName];
-  append(`\n[${roomName}]\n${room.desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}${frontierCoord(roomName) ? `\n원정 노드: ${rogueNodeType()}` : ''}\n출구: ${room.exits.join(', ')}\n고정 NPC: ${(roomNpcs[roomName] || []).join(', ') || '없음'}\n주변 유저: ${roomUsers().map(aiUserLabel).join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
+  append(`\n[${roomName}]\n${room.desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}${frontierCoord(roomName) ? `\n장면: ${character.lastScene}\n원정 노드: ${rogueNodeType()}` : ''}\n출구: ${room.exits.join(', ')}\n고정 NPC: ${(roomNpcs[roomName] || []).join(', ') || '없음'}\n주변 유저: ${roomUsers().map(aiUserLabel).join(', ')}\n팀: ${team.length ? team.join(', ') : '없음'}\n`, 'room');
   showChoices();
 }
 
@@ -1643,7 +1743,7 @@ function inspectRoom() {
   const encounters = encountersForRoom(roomName);
   const event = roomEvent();
   const eventText = event ? `${event.title}${eventDone() ? ' (해결됨)' : ' - "사건"으로 처리'}` : '없음';
-  append(`\n[조사]\n${rooms[roomName].desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}${frontierCoord(roomName) ? `\n원정 노드: ${rogueNodeType()}` : ''}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n장소 사건: ${eventText}\n임무 힌트: ${currentQuest().hint}`, 'room');
+  append(`\n[조사]\n${rooms[roomName].desc}${roomZoneText() ? `\n권역: ${roomZoneText()}` : ''}${frontierCoord(roomName) ? `\n장면: ${character.lastScene}\n원정 노드: ${rogueNodeType()}` : ''}\nNPC: ${npcs.join(', ') || '없음'}\n위험: ${encounters.map((monster) => monster.name).join(', ') || '낮음'}\n장소 사건: ${eventText}\n임무 힌트: ${currentQuest().hint}`, 'room');
   if (roomName === '북문' && character.storyStep === 5) {
     addItem('북문 경비의 표식');
     setStoryStep(6, '북문 조사를 마쳤다. 북문 밖 숲으로 나가 새 발자국을 확인하자.');
@@ -1833,7 +1933,7 @@ function hunt(input = '') {
     return;
   }
 
-  const monster = encounters.find((item) => input && item.name.includes(input.trim())) || pick(encounters);
+  const monster = chooseEncounter(encounters, input);
   const neko = nekoProfile();
   const stats = effectiveStats();
   const gearEffects = equipmentEffects();
@@ -1846,6 +1946,7 @@ function hunt(input = '') {
   const damage = dice.damage;
   const expGain = Math.round(monster.exp * (trait.expRate || 1) * neko.growthRate * gearEffects.expRate);
   const goldGain = Math.round(monster.gold * (trait.goldRate || 1) * neko.goldRate * rogueGoldRate() * gearEffects.goldRate);
+  const groupText = monster.groupCount ? `\n출현: ${monster.groupCount}마리가 한꺼번에 달려들었다.` : '';
   const beforeHp = character.hp;
   character.hp = Math.max(1, character.hp - damage);
   if (rogue.active && beforeHp <= damage) {
@@ -1854,7 +1955,9 @@ function hunt(input = '') {
     return;
   }
   if (!dice.defeated) {
-    append(`\n[전투]\n${monster.name} Lv.${monster.level}와 맞섰지만 끝내 쓰러뜨리지 못했습니다.\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 퇴각 각도를 잡아줬다. 보조 +${neko.combat}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터 HP ${dice.monsterHp}/${monster.hp}. 총 피해 ${damage}를 받고 물러났습니다. 보상은 없습니다.`, 'choice');
+    const twistText = frontierTwist(monster, false);
+    if (!twistText && frontierCoord(roomName)) reflect('불안', '이기지 못한 전투도 다음 판단의 뼈대가 된다.', character.lastScene);
+    append(`\n[전투]\n${monster.name} Lv.${monster.level}와 맞섰지만 끝내 쓰러뜨리지 못했습니다.${groupText}\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 퇴각 각도를 잡아줬다. 보조 +${neko.combat}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터 HP ${dice.monsterHp}/${monster.hp}. 총 피해 ${damage}를 받고 물러났습니다. 보상은 없습니다.${twistText}`, 'choice');
     autoRecoverIfCritical();
     rememberNeko('전투', `${roomName} ${monster.name} 퇴각`, 1);
     commitProgress();
@@ -1863,7 +1966,9 @@ function hunt(input = '') {
   }
   character.exp += expGain;
   character.gold += goldGain;
-  append(`\n[전투]\n${monster.name} Lv.${monster.level}을(를) 공격했다.\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터를 쓰러뜨리고 총 피해 ${damage}를 받았다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전`, 'choice');
+  const twistText = frontierTwist(monster, true);
+  if (!twistText && frontierCoord(roomName)) reflect('희망', '살아남은 전투는 몸보다 먼저 마음을 단련한다.', character.lastScene);
+  append(`\n[전투]\n${monster.name} Lv.${monster.level}을(를) 공격했다.${groupText}\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터를 쓰러뜨리고 총 피해 ${damage}를 받았다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전${twistText}`, 'choice');
   if (team.length) {
     raiseTeamTrust(1);
     append(`[팀 신뢰] ${team.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
@@ -1918,6 +2023,7 @@ function trainCharacter() {
 function fallbackNeko(question = '') {
   const q = question.trim();
   if (/기억|학습|지능|진화/.test(q)) return `내 지식은 Lv.${nekoMemory.level}이야. ${nekoMemory.notes[0] ? `최근엔 ${nekoMemory.notes[0]}을 기억해.` : '아직 쌓인 기억은 적어.'}`;
+  if (/감정|기분|깨달음|생각|위로/.test(q)) return `지금 너는 ${character.mood} 쪽에 가까워 보여. 내가 기억한 문장은 "${character.insight}"야. 다음 행동은 이 감각을 버리지 않는 쪽으로 고르자.`;
   if (/원정|로그|유물|저주|깊이|파편/.test(q)) return rogue.active
     ? `무한원정 진행 중이야. 깊이 ${rogue.depth}, 유물 ${rogue.relics.length}개, 저주 ${rogue.curses.length}개야. 위험하면 "원정종료"로 빠져.`
     : '무한평원에서 "원정"을 입력하면 로그라이크식 무한원정을 시작해. 유물은 강해지고, 깊이 5마다 저주가 붙어.';
@@ -1951,6 +2057,9 @@ function buildSystemInstruction() {
     `특수능력: ${settings.ability}`,
     `추가 설정: ${settings.prompt}`,
     `현재 장소: ${roomName} - ${rooms[roomName].desc}`,
+    `현재 장면: ${character.lastScene}`,
+    `현재 감정: ${character.mood}`,
+    `현재 깨달음: ${character.insight}`,
     `출구: ${rooms[roomName].exits.join(', ')}`,
     `주변 유저: ${roomUsers().map(aiUserLabel).join(', ')}`,
     `현재 팀: ${team.length ? team.join(', ') : '없음'}`,
@@ -2414,6 +2523,19 @@ function aiSocietyEvent(requestedAbility = '') {
     autoLevelUp('AI 스승');
   }
 
+  const socialReflection = {
+    결혼: ['기쁨', '누군가의 떠남은 끝이 아니라 다른 이름의 시작이 되기도 한다.'],
+    살해: ['분노', '힘이 책임을 잃으면 공동체는 가장 약한 사람부터 잃는다.'],
+    약탈: ['분노', '빼앗긴 물건보다 먼저 무너지는 것은 서로를 믿는 감각이다.'],
+    체포: ['희망', '질서는 늦게 도착해도 누군가의 내일을 되찾아 줄 수 있다.'],
+    중재: ['안도', '말 한마디가 칼보다 늦게 오더라도 상처를 덜 깊게 만들 수 있다.'],
+    치유: ['행복', '상처를 돌보는 손길은 전투보다 오래 기억된다.'],
+    상단: ['호기심', '거래는 돈의 이동처럼 보이지만 결국 신뢰의 모양을 드러낸다.'],
+    소문: ['불안', '소문은 사실보다 빠르지만 책임보다 느리다.'],
+    보호: ['안도', '누군가를 지킨다는 말은 그 사람의 시간을 함께 짊어진다는 뜻이다.'],
+    스승: ['희망', '배운다는 것은 어제의 나를 조용히 떠나보내는 일이다.']
+  }[power] || pick(frontierInsights);
+  reflect(socialReflection[0], socialReflection[1], `AI 사회: ${text.slice(0, 36)}`);
   append(`\n[AI 사회]\n${text}\n현재 접속자: ${names.length}명`, 'ally');
   commitProgress();
   renderStatusPanel();
@@ -2436,6 +2558,8 @@ function say(message) {
       : pickFresh(sayResponses);
     append(`${name}: ${response}`);
   });
+  reflect('호기심', '말을 건다는 것은 닫힌 세계에 작은 창문을 내는 일이다.', `대화: ${message.slice(0, 36)}`);
+  commitProgress();
 }
 
 function whisper(input) {
@@ -2448,6 +2572,8 @@ function whisper(input) {
   const name = findUser(target) || target;
   append(`귓속말 -> ${name}: ${rest.join(' ')}`);
   append(`${name}: 응, 들었어. 지금 ${roomName} 근처에 있어.`);
+  reflect('안도', '귓속말은 작지만, 혼자가 아니라는 증거가 되기도 한다.', `귓속말: ${name}`);
+  commitProgress();
 }
 
 function move(destination) {
@@ -2466,6 +2592,13 @@ function move(destination) {
   visitedRooms.add(roomName);
   autoRoomActions = 0;
   autoRoomCommands = [];
+  const scene = sceneTextForRoom(roomName);
+  if (frontierCoord(roomName)) {
+    const [mood, insight] = pick(frontierInsights);
+    reflect(mood, insight, scene);
+  } else {
+    reflect('담담함', character.insight, scene);
+  }
   append(`${roomName}(으)로 이동했다.`);
   if (team.length) append(`${team.join(', ')}: 같이 이동했어.`);
   enterRogueRoom();
@@ -2489,6 +2622,7 @@ function teamUp(query) {
   }
   team.push(name);
   teamTrust[name] = Math.max(1, trustFor(name));
+  reflect('기쁨', '동료가 된다는 것은 같은 위험을 다른 속도로 바라보는 일이다.', `팀 합류: ${name}`);
   commitProgress();
   append(`${name}: 좋아, 같이 가자.`, 'ally');
   append(`현재 팀: ${team.join(', ')}`);
@@ -2509,6 +2643,7 @@ function replaceTeamMember(input = '') {
   }
   team[index] = newName;
   teamTrust[newName] = Math.max(1, trustFor(newName));
+  reflect('불안', '관계는 선택될 때마다 새로 시작되지만, 남겨진 마음도 함께 움직인다.', `팀 교체: ${oldName} -> ${newName}`);
   commitProgress();
   append(`${oldName}이(가) 물러나고 ${newName}이(가) 합류했습니다.`, 'ally');
   append(`현재 팀: ${team.join(', ')}`);
@@ -2516,6 +2651,7 @@ function replaceTeamMember(input = '') {
 
 function clearTeam() {
   team = [];
+  reflect('외로움', '잠시 혼자가 되는 일은 실패가 아니라 다음 만남을 위한 빈자리다.', '팀 해산');
   commitProgress();
   append('팀을 해산했습니다.');
 }
@@ -2527,6 +2663,7 @@ function dismissTeamMember(input = '') {
     return;
   }
   team = team.filter((member) => member !== name);
+  reflect('슬픔', '헤어짐은 명령처럼 짧지만, 마음속에서는 늘 조금 더 길게 울린다.', `팀 해고: ${name}`);
   commitProgress();
   append(`${name}을(를) 팀에서 해고했습니다.`);
 }
