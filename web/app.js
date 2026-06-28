@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.28.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.29.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -55,7 +55,8 @@ const aiAbilityCatalog = ['결혼', '살해', '체포', '약탈', '중재', '치
 const generatedUserWords = ['가람', '누리', '다래', '로하', '바림', '새온', '아린', '여명', '이솔', '찬별', '타래', '하랑', '휘온', '비설', '연담', '초린'];
 let aiBirthSeq = 1;
 let aiWealth = {};
-let economy = { index: 100, fund: 0, last: '광장 장터 개장', concepts: [] };
+let aiDebt = {};
+let economy = { index: 100, fund: 0, last: '광장 장터 개장', concepts: [], reputation: 0, contracts: [] };
 let nekoTraining = { combat: 0, luck: 0, counsel: 0 };
 
 function hashName(name) {
@@ -107,13 +108,15 @@ function removeAiUser(name) {
   team = team.filter((member) => member !== name);
   delete teamTrust[name];
   delete aiWealth[name];
+  delete aiDebt[name];
   return true;
 }
 
 const rooms = {
   '중앙광장': { exits: ['북문', '주막', '수련장', '현감청', '생명의나무'], desc: '푸른 전광판과 오래된 향로가 있는 시작 광장이다.' },
   '북문': { exits: ['중앙광장', '초보사냥터', '북문 밖 숲'], desc: '성문 밖에서 낮은 북소리가 들리고 경비가 길을 막고 있다.' },
-  '주막': { exits: ['중앙광장', '장터'], desc: '소문과 농담이 가장 빨리 모이는 곳이다.' },
+  '주막': { exits: ['중앙광장', '장터', '도박장'], desc: '소문과 농담이 가장 빨리 모이는 곳이다.' },
+  '도박장': { exits: ['주막'], desc: '푸른 칩과 낡은 확률표가 걸린 지하 놀이판이다.' },
   '수련장': { exits: ['중앙광장'], desc: '낡은 목검과 허수아비가 줄지어 서 있다.' },
   '현감청': { exits: ['중앙광장'], desc: '초보 모험가에게 첫 임무를 내리는 관아다.' },
   '생명의나무': { exits: ['중앙광장', '초보사냥터'], desc: '새 모험가들이 길을 묻는 거대한 나무가 뿌리를 드리우고 있다.' },
@@ -1123,15 +1126,33 @@ function setWealth(name, amount) {
   aiWealth[name] = Math.max(0, Math.round(amount));
 }
 
+function debtFor(name) {
+  return Math.max(0, Number(aiDebt[name]) || 0);
+}
+
+function addDebt(name, amount) {
+  if (!names.includes(name)) return;
+  aiDebt[name] = Math.max(0, Math.round(debtFor(name) + amount));
+}
+
 function addEconomyConcept(concept) {
   if (!concept) return;
   economy.concepts = [concept].concat(economy.concepts.filter((item) => item !== concept)).slice(0, 8);
+}
+
+function addContract(contract) {
+  if (!contract) return;
+  economy.contracts = [contract].concat((economy.contracts || []).filter((item) => item !== contract)).slice(0, 8);
 }
 
 function shiftEconomy(delta, concept, text) {
   economy.index = Math.max(40, Math.min(180, Math.round((Number(economy.index) || 100) + delta)));
   economy.last = text || economy.last;
   addEconomyConcept(concept);
+}
+
+function shiftReputation(delta) {
+  economy.reputation = Math.max(-99, Math.min(99, Math.round((Number(economy.reputation) || 0) + delta)));
 }
 
 function spendGold(cost, reason) {
@@ -1232,9 +1253,9 @@ function mapText() {
   return `${here('현감청')}        ${here('수련장')}
     \\          /
      ${here('중앙광장')} -- ${here('주막')} -- ${here('장터')}
-        |       \\
-      ${here('북문')}    ${here('생명의나무')}
-     /   \\        |
+        |    \\      |
+      ${here('북문')}  ${here('생명의나무')} ${here('도박장')}
+     /   \\    |
 ${here('초보사냥터')}  ${here('북문 밖 숲')}
               |
           ${here('폐광 입구')} -- ${here('무한평원 01-01')}
@@ -1271,6 +1292,7 @@ function saveGameState() {
       teamTrust,
       aiUsers: names,
       aiWealth,
+      aiDebt,
       economy,
       nekoTraining,
       aiBirthSeq,
@@ -1340,12 +1362,19 @@ function loadGameState() {
       .filter(([name]) => names.includes(name))
       .map(([name, value]) => [name, Math.max(0, Number(value) || 0)]));
   }
+  if (saved.aiDebt && typeof saved.aiDebt === 'object') {
+    aiDebt = Object.fromEntries(Object.entries(saved.aiDebt)
+      .filter(([name]) => names.includes(name))
+      .map(([name, value]) => [name, Math.max(0, Number(value) || 0)]));
+  }
   if (saved.economy && typeof saved.economy === 'object') {
     economy = {
       index: Math.max(40, Math.min(180, Number(saved.economy.index) || 100)),
       fund: Math.max(0, Number(saved.economy.fund) || 0),
       last: String(saved.economy.last || economy.last),
-      concepts: Array.isArray(saved.economy.concepts) ? saved.economy.concepts.filter(Boolean).slice(0, 8) : []
+      concepts: Array.isArray(saved.economy.concepts) ? saved.economy.concepts.filter(Boolean).slice(0, 8) : [],
+      reputation: Math.max(-99, Math.min(99, Number(saved.economy.reputation) || 0)),
+      contracts: Array.isArray(saved.economy.contracts) ? saved.economy.contracts.filter(Boolean).slice(0, 8) : []
     };
   }
   if (saved.nekoTraining && typeof saved.nekoTraining === 'object') {
@@ -1417,6 +1446,11 @@ function renderStatusPanel() {
   const neko = nekoProfile();
   const growth = growthForJob();
   const stats = effectiveStats();
+  const debtors = Object.entries(aiDebt)
+    .filter(([, debt]) => Number(debt) > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name, debt]) => `${name} ${debt}전`);
   statusPanelEl.textContent = [
     '[캐릭터]',
     `이름: ${character.name}`,
@@ -1440,6 +1474,9 @@ function renderStatusPanel() {
     '[경제]',
     `시장지수: ${economy.index}`,
     `공동기금: ${economy.fund} 전`,
+    `평판: ${economy.reputation}`,
+    `부채: ${debtors.join(', ') || '없음'}`,
+    `계약: ${(economy.contracts || []).slice(0, 3).join(' / ') || '없음'}`,
     `최근: ${economy.last}`,
     `새 개념: ${economy.concepts.join(', ') || '없음'}`,
     '',
@@ -1683,6 +1720,8 @@ function giftTeam(input = '') {
     teamTrust[name] = Math.min(99, trustFor(name) + (target ? 5 : 3));
     setWealth(name, wealthFor(name) + Math.floor(cost / targets.length));
   });
+  shiftReputation(1);
+  targets.forEach((name) => addContract(`${name} 동료 급여`));
   shiftEconomy(1, '급여 계약', `${targets.join(', ')}에게 ${cost}전이 지급됐다.`);
   reflect('기쁨', '관계는 마음만으로 유지되지 않고, 때로는 밥값으로도 증명된다.', `동료 선물: ${targets.join(', ')}`);
   commitProgress();
@@ -1738,6 +1777,7 @@ function applyEconomyEvent(kind, actor, target) {
     const loss = Math.min(actorMoney, 80 + (hashName(actor) % 120));
     setWealth(actor, actorMoney - loss);
     setWealth(target, targetMoney + Math.floor(loss * 0.2));
+    addDebt(actor, loss);
     shiftEconomy(-5, '부실채권', `${actor}의 파산으로 빚문서가 돌기 시작했다.`);
     return `${actor}이(가) 파산했다. ${loss}전 규모의 부실채권이 생기고 ${target}이(가) 일부를 헐값에 사들였다.`;
   }
@@ -1746,6 +1786,7 @@ function applyEconomyEvent(kind, actor, target) {
     setWealth(actor, actorMoney - wage);
     setWealth(target, targetMoney + wage);
     if (team.includes(target)) teamTrust[target] = Math.min(99, trustFor(target) + 2);
+    addContract(`${actor}-${target} 고용`);
     shiftEconomy(2, '고용 시장', `${actor}이(가) ${target}에게 ${wage}전을 지급했다.`);
     return `${actor}이(가) ${target}을(를) 고용했다. 급여 ${wage}전이 이동했다.`;
   }
@@ -1754,6 +1795,7 @@ function applyEconomyEvent(kind, actor, target) {
     setWealth(actor, actorMoney - gift);
     economy.fund += gift;
     if (character.hp < character.hpMax) character.hp = Math.min(character.hpMax, character.hp + 5);
+    shiftReputation(1);
     shiftEconomy(1, '구호 기금', `${actor}의 기부금 ${gift}전이 공동기금에 들어왔다.`);
     return `${actor}이(가) ${gift}전을 기부했다. 주막에는 구호 기금이라는 새 말이 돌기 시작했다.`;
   }
@@ -1761,6 +1803,8 @@ function applyEconomyEvent(kind, actor, target) {
   const success = Math.random() + economy.index / 260 > 0.82;
   setWealth(actor, actorMoney - stake + (success ? stake * 2 : Math.floor(stake * 0.25)));
   setWealth(target, targetMoney + (success ? Math.floor(stake * 0.4) : Math.floor(stake * 0.1)));
+  if (!success) addDebt(actor, Math.floor(stake * 0.45));
+  addContract(`${actor}-${target} 투자`);
   shiftEconomy(success ? 4 : -4, success ? '투자 조합' : '실패 담보', `${actor}의 투자 ${success ? '성공' : '실패'}`);
   return success
     ? `${actor}이(가) ${target}에게 ${stake}전을 투자해 성공했다. 배당과 소문이 시장을 달궜다.`
@@ -1775,6 +1819,75 @@ function economyEvent(input = '') {
   append(`\n[경제]\n${text}\n시장지수: ${economy.index}\n새 개념: ${economy.concepts[0] || '없음'}`, 'ally');
   commitProgress();
   renderStatusPanel();
+}
+
+function gambleStake(input = '') {
+  const amount = Number((input.match(/\d+/) || [])[0]) || 50;
+  return Math.max(10, Math.min(500, Math.floor(amount)));
+}
+
+function settleGamble(game, stake, win, detail, payout = stake * 2, loseEffect = null) {
+  if (!spendGold(stake, game)) return;
+  if (win) {
+    character.gold += payout;
+    economy.fund = Math.max(0, economy.fund - Math.floor(payout / 2));
+    shiftReputation(1);
+  } else {
+    if (loseEffect) loseEffect();
+    shiftReputation(game === '검은 룰렛' ? -2 : -1);
+  }
+  const detailText = typeof detail === 'function' ? detail() : detail;
+  shiftEconomy(win ? 1 : -1, '도박장 신용', `${game} ${stake}전 ${win ? '승리' : '패배'}`);
+  reflect(win ? '기쁨' : '불안', win ? '운은 노력의 반대가 아니라 위험을 감당한 뒤 남는 해석이다.' : '잃은 돈은 숫자지만, 잃은 판단은 다음 선택에 남는다.', `도박장: ${game}`);
+  commitProgress();
+  append(`\n[도박장]\n게임: ${game}\n판돈: ${stake} 전\n${detailText}\n결과: ${win ? `승리 / 수령 ${payout}전` : '패배'}\n평판: ${economy.reputation}`, win ? 'ally' : 'choice');
+  showChoices();
+}
+
+function drawBlackjack() {
+  return Math.min(10, 1 + Math.floor(Math.random() * 13));
+}
+
+function gamble(input = '') {
+  if (roomName !== '도박장') {
+    append('도박은 주막 옆 도박장에서만 가능합니다. 예) 이동 주막 → 이동 도박장');
+    showChoices();
+    return;
+  }
+  const stake = gambleStake(input);
+  if (/블랙잭|blackjack/i.test(input)) {
+    const player = drawBlackjack() + drawBlackjack() + (Math.random() > 0.55 ? drawBlackjack() : 0);
+    const dealer = drawBlackjack() + drawBlackjack() + (Math.random() > 0.45 ? drawBlackjack() : 0);
+    const win = player <= 21 && (dealer > 21 || player >= dealer);
+    settleGamble('블랙잭', stake, win, `주인공 ${player} / 딜러 ${dealer}`);
+    return;
+  }
+  if (/파칭코|pachinko/i.test(input)) {
+    const roll = Math.random() + nekoProfile().luck / 180;
+    const multiplier = roll > 0.96 ? 6 : roll > 0.82 ? 3 : roll > 0.58 ? 1.5 : 0;
+    settleGamble('파칭코', stake, multiplier > 0, `구슬 흐름 배율 x${multiplier}`, Math.round(stake * multiplier));
+    return;
+  }
+  if (/텍사스|포커|poker/i.test(input)) {
+    const roll = Math.random() + economy.index / 300;
+    const rank = roll > 1.08 ? ['풀하우스', 5] : roll > 0.92 ? ['플러시', 3] : roll > 0.7 ? ['원페어', 2] : ['하이카드', 0];
+    settleGamble('텍사스포커', stake, rank[1] > 0, `패: ${rank[0]}`, stake * rank[1]);
+    return;
+  }
+  if (/러시안|룰렛|roulette/i.test(input)) {
+    const safe = Math.random() + economy.reputation / 300 > 0.18;
+    settleGamble(
+      '검은 룰렛',
+      stake,
+      safe,
+      () => (safe ? '검은 칸을 피했다.' : `위험 칸. HP ${character.hp}/${character.hpMax}`),
+      stake * 4,
+      () => { character.hp = Math.max(1, character.hp - (3 + character.level)); }
+    );
+    return;
+  }
+  append('\n[도박장]\n도박 블랙잭 50\n도박 파칭코 50\n도박 텍사스포커 50\n도박 러시안룰렛 50\n네코: 이곳은 돈보다 판단력이 먼저 닳는 장소야.', 'room');
+  showChoices();
 }
 
 function setStoryStep(step, text) {
@@ -2232,7 +2345,7 @@ function fallbackNeko(question = '') {
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 해고는 "팀해고 이름", 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
   if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한평원, 자동목표 팀을 쓸 수 있어.';
-  if (/돈|경제|투자|급여|선물|정보|치료소/.test(q)) return `시장지수는 ${economy.index}, 새 개념은 ${economy.concepts.join(', ') || '아직 없음'}이야. 돈은 "네코훈련 행운", "선물 이름", "정보구매", "치료소", "연성 투자", "경제 투자"로 쓸 수 있어.`;
+  if (/돈|경제|투자|급여|선물|정보|치료소|도박|블랙잭|파칭코|포커/.test(q)) return `시장지수는 ${economy.index}, 새 개념은 ${economy.concepts.join(', ') || '아직 없음'}이야. 돈은 "네코훈련 행운", "선물 이름", "정보구매", "치료소", "연성 투자", "경제 투자", "도박 블랙잭 50"으로 쓸 수 있어.`;
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/연성|조합|융합|합성|도박/.test(q)) return `보관함 아이템이 2개 이상이면 "연성"으로 새 장비를 만들 수 있어. 내 행운은 ${nekoProfile().luck}이라 결과가 조금 흔들려.`;
   if (/장비|착용|무기/.test(q)) return '장터 장비를 사거나, 보관 아이템을 "연성"해서 특수능력 장비를 만들 수 있어. 착용은 "착용 장비명"이야.';
@@ -2266,7 +2379,7 @@ function buildSystemInstruction() {
     `주변 유저: ${roomUsers().map(aiUserLabel).join(', ')}`,
     `현재 팀: ${team.length ? team.join(', ') : '없음'}`,
     `캐릭터: 레벨 ${character.level}, HP ${character.hp}/${character.hpMax}, MP ${character.mp}/${character.mpMax}, 공격 ${character.attack}, 방어 ${character.defense}, 정신 ${character.spirit}, EXP ${character.exp}/${character.expToLevel}, 돈 ${character.gold}`,
-    `경제: 시장지수 ${economy.index}, 공동기금 ${economy.fund}, 최근 ${economy.last}, 새 개념 ${economy.concepts.join(', ') || '없음'}`,
+    `경제: 시장지수 ${economy.index}, 공동기금 ${economy.fund}, 평판 ${economy.reputation}, 계약 ${(economy.contracts || []).join(', ') || '없음'}, 최근 ${economy.last}, 새 개념 ${economy.concepts.join(', ') || '없음'}`,
     `현재 임무: ${currentQuest().title} - ${currentQuest().goal}`,
     `소지품: ${character.inventory.join(', ')}`,
     `연성 장비: ${Object.keys(customItems).join(', ') || '없음'}`,
@@ -2275,7 +2388,7 @@ function buildSystemInstruction() {
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '축적 지식과 최근 기억을 근거로 다음 행동을 더 똑똑하게 추천한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 이동 도박장, 도박 블랙잭 50, 도박 파칭코 50, 도박 텍사스포커 50, 도박 러시안룰렛 50, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -2473,6 +2586,7 @@ function makeChoices() {
   const combat = encountersForRoom(roomName).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null;
   const heal = character.hp < character.hpMax ? { label: 'HP 회복', command: '회복' } : null;
   const shop = canShopHere() ? { label: '회복약 구매', command: '구매 회복약' } : null;
+  const gambling = roomName === '도박장' ? { label: '도박장 판 보기', command: '도박' } : null;
   const upgrade = canShopHere() ? { label: '무기 강화', command: '강화 무기' } : null;
   const fusion = character.inventory.filter((item) => !shopItems[item]?.heal).length >= 2
     ? { label: '네코 아이템 연성', command: '연성' }
@@ -2489,6 +2603,7 @@ function makeChoices() {
     { label: '주변 조사', command: '조사' },
     fusion,
     shop,
+    gambling,
     combat,
     roomName === '수련장' ? { label: '수련하기', command: '수련' } : null,
     canShopHere() ? { label: '청동검 구매', command: '구매 청동검' } : null,
@@ -2689,6 +2804,7 @@ function aiSocietyEvent(requestedAbility = '') {
       team = team.filter((member) => member !== actor);
       delete teamTrust[actor];
     }
+    addContract(`${actor}-${target} 혼인`);
     text = `${actor}와 ${target}이(가) 결혼했다. ${leftTeam ? `${actor}은(는) 파티를 떠났다. ` : ''}아이 ${child}이(가) 새로 접속했다.`;
   } else if (power === '살해') {
     const seized = Math.floor(wealthFor(target) * 0.35);
@@ -2726,6 +2842,7 @@ function aiSocietyEvent(requestedAbility = '') {
     rememberNeko('대화', `${actor} 소문`, 1);
   } else if (power === '보호') {
     if (team.includes(target)) teamTrust[target] = Math.min(99, trustFor(target) + 2);
+    addContract(`${actor}-${target} 보호`);
     text = `${actor}이(가) ${target}을(를) 보호했다.`;
   } else if (['투자', '파산', '고용', '기부'].includes(power)) {
     text = applyEconomyEvent(power, actor, target);
@@ -2885,7 +3002,7 @@ function dismissTeamMember(input = '') {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한평원 05-05`);
+  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n도박              도박장 게임 목록\n도박 블랙잭 50    블랙잭 판돈 50전\n도박 파칭코 50    파칭코 판돈 50전\n도박 텍사스포커 50 포커 판돈 50전\n도박 러시안룰렛 50 검은 룰렛 판돈 50전\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀\n예) 이동 주막 → 이동 도박장\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한평원 05-05`);
 }
 
 function blueprint() {
@@ -2974,6 +3091,11 @@ async function runCommand(raw) {
   else if (['정보구매', '정보상', '소문구매'].includes(command)) buyInformation(body);
   else if (['치료소', '부상치료', '저주해제', '요양'].includes(command)) paidCare(`${command} ${body}`);
   else if (['경제', '투자', '파산', '고용', '기부'].includes(command)) economyEvent(`${command} ${body}`);
+  else if (command === '도박장') {
+    if (roomName !== '도박장' && rooms[roomName].exits.includes('도박장')) move('도박장');
+    else gamble(body);
+  }
+  else if (['도박', '카지노', '블랙잭', '파칭코', '텍사스포커', '포커', '러시안룰렛', '룰렛'].includes(command)) gamble(`${command} ${body}`);
   else if (['사회', '사건사회', 'social'].includes(command)) aiSocietyEvent(body);
   else if (['소지품', '소지', 'inventory'].includes(command)) showInventory();
   else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();
