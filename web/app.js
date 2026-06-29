@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.5';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.6';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -1853,6 +1853,14 @@ function gambleStake(input = '') {
   return Math.max(10, Math.min(500, Math.floor(amount)));
 }
 
+function noteGambleBankruptcy(game, stake) {
+  if (character.gold > 0 || stake <= 0) return;
+  addContract('도박장 외상 주의');
+  reflect('절망', '빈 주머니는 끝이 아니라, 다음 선택이 얼마나 진짜인지 묻는 조용한 질문이다.', `도박 파산: ${game}`);
+  commitProgress();
+  append(`[도박장 파산]\n남은 돈 0전. 네코: 지금은 더 걸 돈이 없어. "사냥", "사건", "사회 상단"으로 다시 발판을 만들자.`, 'neko');
+}
+
 function settleGamble(game, stake, result, detail, payout = stake * 2, loseEffect = null) {
   if (!spendGold(stake, game)) return;
   const outcome = result === 'push' || result === 'partial' ? result : result ? 'win' : 'lose';
@@ -1872,6 +1880,7 @@ function settleGamble(game, stake, result, detail, payout = stake * 2, loseEffec
   reflect(outcome === 'lose' ? '불안' : '기쁨', outcome === 'lose' ? '잃은 돈은 숫자지만, 잃은 판단은 다음 선택에 남는다.' : '운은 노력의 반대가 아니라 위험을 감당한 뒤 남는 해석이다.', `도박장: ${game}`);
   commitProgress();
   append(`\n[도박장]\n게임: ${game}\n판돈: ${stake} 전\n${detailText}\n결과: ${outcomeText}\n평판: ${economy.reputation}`, outcome === 'lose' ? 'choice' : 'ally');
+  if (outcome === 'lose') noteGambleBankruptcy(game, stake);
   showChoices();
 }
 
@@ -1912,12 +1921,13 @@ function finishBlackjack(outcome, detail) {
     character.gold += payout;
     economy.fund = Math.max(0, economy.fund - Math.floor(payout / 2));
   }
-  shiftEconomy(outcome === 'lose' ? -1 : 1, '블랙잭 테이블', `블랙잭 ${hand.stake}전 ${outcome}`);
-  shiftReputation(outcome === 'lose' ? -1 : 1);
-  reflect(outcome === 'lose' ? '불안' : '기쁨', '카드를 더 받는 용기와 멈추는 용기는 서로 다른 기술이다.', '도박장: 블랙잭');
+  shiftEconomy(outcome === 'lose' ? -1 : outcome === 'push' ? 0 : 1, '블랙잭 테이블', `블랙잭 ${hand.stake}전 ${outcome}`);
+  if (outcome !== 'push') shiftReputation(outcome === 'lose' ? -1 : 1);
+  reflect(outcome === 'lose' ? '불안' : outcome === 'push' ? '안도' : '기쁨', '카드를 더 받는 용기와 멈추는 용기는 서로 다른 기술이다.', '도박장: 블랙잭');
   gambleState.blackjack = null;
   commitProgress();
   append(`\n[도박장]\n게임: 블랙잭\n판돈: ${hand.stake} 전\n내 패: ${cardsText(hand.player)} (${blackjackValue(hand.player)})\n딜러 패: ${cardsText(hand.dealer)} (${blackjackValue(hand.dealer)})\n${detail}\n결과: ${outcome === 'push' ? `푸시 / 반환 ${payout}전` : outcome === 'lose' ? '패배' : `승리 / 수령 ${payout}전`}`, outcome === 'lose' ? 'choice' : 'ally');
+  if (outcome === 'lose') noteGambleBankruptcy('블랙잭', hand.stake);
   showChoices();
 }
 
@@ -2520,13 +2530,13 @@ function fallbackNeko(question = '') {
   if (/지도|맵|map/.test(q)) return `지도는 "지도"라고 입력하면 볼 수 있어. 현재 위치는 ${roomName}이야.`;
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 해고는 "팀해고 이름", 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
-  if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한평원, 자동목표 팀을 쓸 수 있어.';
-  if (/돈|경제|투자|급여|선물|정보|치료소|도박|블랙잭|파칭코|포커/.test(q)) return `시장지수는 ${economy.index}, 새 개념은 ${economy.concepts.join(', ') || '아직 없음'}이야. 돈은 "네코훈련 행운", "선물 이름", "정보구매", "치료소", "연성 투자", "경제 투자", "도박 블랙잭 50"으로 쓸 수 있어.`;
+  if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한평원, 자동목표 팀, 자동목표 도박을 쓸 수 있어.';
+  if (/돈|경제|투자|급여|선물|정보|치료소|도박|블랙잭|파칭코|포커/.test(q)) return `시장지수는 ${economy.index}, 새 개념은 ${economy.concepts.join(', ') || '아직 없음'}이야. 돈은 "네코훈련 행운", "선물 이름", "정보구매", "치료소", "연성 투자", "경제 투자", "도박 블랙잭 50", "도박 파칭코 올인"으로 쓸 수 있어.`;
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/연성|조합|융합|합성|도박/.test(q)) return `보관함 아이템이 2개 이상이면 "연성"으로 새 장비를 만들 수 있어. 내 행운은 ${nekoProfile().luck}이라 결과가 조금 흔들려.`;
   if (/장비|착용|무기/.test(q)) return '장터 장비를 사거나, 보관 아이템을 "연성"해서 특수능력 장비를 만들 수 있어. 착용은 "착용 장비명"이야.';
   if (/임무|퀘스트|스토리/.test(q)) return `${currentQuest().title}: ${currentQuest().goal} 힌트는 "${currentQuest().hint}"야.`;
-  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 사건, 사냥, 회복, 원정, 원정종료, 구매 회복약, 착용 청동검, 강화 무기, 자동목표 무한평원, 이동 장소를 쓸 수 있어.';
+  if (/명령|도움|뭐.*해|방법/.test(q)) return '환영, 임무, 지도, 조사, 사건, 사냥, 회복, 원정, 원정종료, 구매 회복약, 강화 무기, 자동목표 도박, 도박 블랙잭 올인, 이동 장소를 쓸 수 있어.';
   if (/회복|피|HP|hp|죽/.test(q)) return 'HP가 낮으면 "회복"이라고 해. 동료와 내가 먼저 돕고, 부족하면 회복약을 써. 장터에서는 "구매 회복약"도 가능해.';
   if (/사람|유저|누구/.test(q)) return `가상 유저 ${names.length}명이 접속 중이야. 이 방에는 ${roomUsers().slice(0, 6).map(aiUserLabel).join(', ')} 등이 있어.`;
   if (/사냥|전투|초보/.test(q)) return '처음이면 수련장으로 가고, 팀을 만든 뒤 북문을 지나 초보사냥터로 가면 안전해.';
@@ -2564,7 +2574,7 @@ function buildSystemInstruction() {
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '축적 지식과 최근 기억을 근거로 다음 행동을 더 똑똑하게 추천한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 이동 도박장, 도박 블랙잭 50, 도박 파칭코 50, 도박 텍사스포커 50, 도박 러시안룰렛 50, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 이동 도박장, 도박 블랙잭 50, 도박 파칭코 50, 도박 텍사스포커 50, 도박 러시안룰렛 50, 도박 블랙잭 올인, 도박 파칭코 올인, 도박 텍사스포커 올인, 도박 러시안룰렛 올인, 자동목표 도박, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -2744,7 +2754,13 @@ function bestAutoGambleChoice() {
     ? { label: '블랙잭 히트', command: '히트' }
     : { label: '블랙잭 스탠드', command: '스탠드' };
   if (roomName !== '도박장') return { label: '도박장으로 이동', command: moveCommandToward('도박장') };
-  return pick([
+  const aggressive = nekoProfile().risk === '공격' && character.gold >= 150;
+  return pick(aggressive ? [
+    { label: '블랙잭 올인', command: '도박 블랙잭 올인' },
+    { label: '파칭코 올인', command: '도박 파칭코 올인' },
+    { label: '텍사스포커 올인', command: '도박 텍사스포커 올인' },
+    { label: '검은 룰렛 올인', command: '도박 러시안룰렛 올인' }
+  ] : [
     { label: '블랙잭 50전', command: '도박 블랙잭 50' },
     { label: '파칭코 50전', command: '도박 파칭코 50' },
     { label: '텍사스포커 50전', command: '도박 텍사스포커 50' },
