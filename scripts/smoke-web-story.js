@@ -130,6 +130,12 @@ async function submit(command) {
   if (!screenText().includes('게임: 블랙잭') || !screenText().includes('게임: 파칭코') || !screenText().includes('게임: 텍사스포커') || !screenText().includes('게임: 검은 룰렛')) throw new Error('도박장 4종 게임 실행 실패');
   if (!screenText().includes('구슬') || !screenText().includes('보드:') || !screenText().includes('족보:') || !screenText().includes('6칸 중')) throw new Error('도박장 실제 룰 표시 실패');
   if (!elements.statusPanel.textContent.includes('도박장 신용')) throw new Error('도박장 경제 반영 실패');
+  await submit('자동목표 도박');
+  if (!elements.statusPanel.textContent.includes('자동 목표: 도박 우선')) throw new Error('도박 자동 목표 변경 실패');
+  await submit('자동');
+  await context.autoTick();
+  if (!screenText().includes('=> 도박 ')) throw new Error('도박 우선 자동 진행 실패');
+  await submit('자동');
   await submit('이동 주막');
   await submit('이동 중앙광장');
   seed = seedBeforeGambling;
