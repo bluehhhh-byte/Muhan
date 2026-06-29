@@ -119,9 +119,8 @@ async function submit(command) {
   if (!elements.statusPanel.textContent.includes('자동 목표: 스토리 우선')) throw new Error('자동 목표 기본값 표시 실패');
   await submit('이동 주막');
   await submit('이동 도박장');
-  await submit('도박');
-  if (!screenText().includes('도박 블랙잭') || !screenText().includes('도박 러시안룰렛')) throw new Error('도박장 게임 목록 표시 실패');
-  await submit('도박 블랙잭 10');
+  if (!screenText().includes('1. 블랙잭 50전') || !screenText().includes('4. 러시안룰렛 50전')) throw new Error('도박장 직접 선택지 표시 실패');
+  await submit('1');
   await submit('도박 파칭코 10');
   await submit('도박 텍사스포커 10');
   await submit('도박 러시안룰렛 10');

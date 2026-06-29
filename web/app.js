@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.29.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.29.1';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -2580,13 +2580,20 @@ function bestAutoMoveChoice() {
 }
 
 function makeChoices() {
+  if (roomName === '도박장') {
+    return [
+      { label: '블랙잭 50전', command: '도박 블랙잭 50' },
+      { label: '파칭코 50전', command: '도박 파칭코 50' },
+      { label: '텍사스포커 50전', command: '도박 텍사스포커 50' },
+      { label: '러시안룰렛 50전', command: '도박 러시안룰렛 50' }
+    ];
+  }
   const room = rooms[roomName];
   const candidate = roomUsers().find((name) => !team.includes(name)) || roomUsers()[0];
   const event = eventChoice();
   const combat = encountersForRoom(roomName).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null;
   const heal = character.hp < character.hpMax ? { label: 'HP 회복', command: '회복' } : null;
   const shop = canShopHere() ? { label: '회복약 구매', command: '구매 회복약' } : null;
-  const gambling = roomName === '도박장' ? { label: '도박장 판 보기', command: '도박' } : null;
   const upgrade = canShopHere() ? { label: '무기 강화', command: '강화 무기' } : null;
   const fusion = character.inventory.filter((item) => !shopItems[item]?.heal).length >= 2
     ? { label: '네코 아이템 연성', command: '연성' }
@@ -2603,7 +2610,6 @@ function makeChoices() {
     { label: '주변 조사', command: '조사' },
     fusion,
     shop,
-    gambling,
     combat,
     roomName === '수련장' ? { label: '수련하기', command: '수련' } : null,
     canShopHere() ? { label: '청동검 구매', command: '구매 청동검' } : null,
