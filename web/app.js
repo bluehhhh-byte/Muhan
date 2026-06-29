@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.2';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.3';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -1843,7 +1843,12 @@ function economyEvent(input = '') {
   renderStatusPanel();
 }
 
+function isAllIn(input = '') {
+  return /올인|all[-\s]?in|전부|전체|모두/i.test(input);
+}
+
 function gambleStake(input = '') {
+  if (isAllIn(input)) return Math.max(0, Math.floor(character.gold));
   const amount = Number((input.match(/\d+/) || [])[0]) || 50;
   return Math.max(10, Math.min(500, Math.floor(amount)));
 }
@@ -2006,7 +2011,15 @@ function gamble(input = '') {
     showChoices();
     return;
   }
+  if (isAllIn(input) && !/블랙잭|blackjack|파칭코|pachinko|텍사스|포커|poker|러시안|룰렛|roulette/i.test(input)) {
+    input = `${input} 블랙잭`;
+  }
   const stake = gambleStake(input);
+  if (stake <= 0) {
+    append('올인할 돈이 없습니다. 사냥이나 사건으로 돈을 먼저 마련하세요.');
+    showChoices();
+    return;
+  }
   if (/블랙잭|blackjack/i.test(input)) {
     startBlackjack(stake);
     return;
@@ -2049,7 +2062,7 @@ function gamble(input = '') {
     );
     return;
   }
-  append('\n[도박장]\n도박 블랙잭 50\n도박 파칭코 50\n도박 텍사스포커 50\n도박 러시안룰렛 50\n네코: 이곳은 돈보다 판단력이 먼저 닳는 장소야.', 'room');
+  append('\n[도박장]\n도박 블랙잭 50\n도박 파칭코 50\n도박 텍사스포커 50\n도박 러시안룰렛 50\n도박 블랙잭 올인\n네코: 이곳은 돈보다 판단력이 먼저 닳는 장소야.', 'room');
   showChoices();
 }
 
@@ -2772,7 +2785,8 @@ function makeChoices() {
       { label: '블랙잭 50전', command: '도박 블랙잭 50' },
       { label: '파칭코 50전', command: '도박 파칭코 50' },
       { label: '텍사스포커 50전', command: '도박 텍사스포커 50' },
-      { label: '러시안룰렛 50전', command: '도박 러시안룰렛 50' }
+      { label: '러시안룰렛 50전', command: '도박 러시안룰렛 50' },
+      { label: '블랙잭 올인', command: '도박 블랙잭 올인' }
     ];
   }
   const room = rooms[roomName];
@@ -3198,7 +3212,7 @@ function dismissTeamMember(input = '') {
 }
 
 function help() {
-  append(`\n[명령어]\n1~4               추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n자동목표 도박     자동으로 도박장 게임 진행\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n도박              도박장 게임 목록\n도박 블랙잭 50    블랙잭 판돈 50전\n도박 파칭코 50    파칭코 판돈 50전\n도박 텍사스포커 50 포커 판돈 50전\n도박 러시안룰렛 50 검은 룰렛 판돈 50전\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀 / 도박\n예) 이동 주막 → 이동 도박장\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한평원 05-05`);
+  append(`\n[명령어]\n숫자              추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n자동목표 도박     자동으로 도박장 게임 진행\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n도박              도박장 게임 목록\n도박 블랙잭 50    블랙잭 판돈 50전\n도박 블랙잭 올인  보유금 전부를 블랙잭에 걸기\n도박 파칭코 올인  보유금 전부를 파칭코에 걸기\n도박 텍사스포커 올인 보유금 전부를 포커에 걸기\n도박 러시안룰렛 올인 보유금 전부를 검은 룰렛에 걸기\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀 / 도박\n예) 이동 주막 → 이동 도박장\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한평원 05-05`);
 }
 
 function blueprint() {
@@ -3254,7 +3268,7 @@ async function runCommand(raw) {
     return;
   }
 
-  if (/^[1-4]$/.test(input) && choiceSlots[Number(input) - 1]) {
+  if (/^\d+$/.test(input) && choiceSlots[Number(input) - 1]) {
     const choice = choiceSlots[Number(input) - 1];
     append(`=> ${choice.command}`, 'choice');
     await runCommand(choice.command);
@@ -3293,7 +3307,7 @@ async function runCommand(raw) {
     if (roomName !== '도박장' && rooms[roomName].exits.includes('도박장')) move('도박장');
     else gamble(body);
   }
-  else if (['도박', '카지노', '블랙잭', '파칭코', '텍사스포커', '포커', '러시안룰렛', '룰렛'].includes(command)) gamble(`${command} ${body}`);
+  else if (['도박', '카지노', '블랙잭', '파칭코', '텍사스포커', '포커', '러시안룰렛', '룰렛', '올인', 'allin', 'all-in'].includes(command)) gamble(`${command} ${body}`);
   else if (['사회', '사건사회', 'social'].includes(command)) aiSocietyEvent(body);
   else if (['소지품', '소지', 'inventory'].includes(command)) showInventory();
   else if (['점수', '정보', '건강', 'score'].includes(command)) showScore();

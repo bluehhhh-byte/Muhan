@@ -88,6 +88,8 @@ const context = {
 context.globalThis = context;
 
 vm.runInNewContext(fs.readFileSync('web/app.js', 'utf8'), context, { filename: 'web/app.js' });
+const allInStake = vm.runInNewContext('(() => { const old = character.gold; character.gold = 777; const stake = gambleStake("도박 블랙잭 올인"); character.gold = old; return stake; })()', context);
+if (allInStake !== 777) throw new Error('도박 올인 판돈 계산 실패');
 
 function screenText() {
   return elements.gameScreen.children.map((child) => child.textContent).join('\n');
@@ -106,6 +108,9 @@ async function submit(command) {
   if (!elements.statusPanel.textContent.includes('자동 목표: 도박 우선')) throw new Error('도박 자동 목표 드롭다운 선택 실패');
   elements.autoMode.value = 'story';
   elements.autoMode.listeners.change();
+  vm.runInNewContext('choiceSlots = [{ label: "1", command: "지도" }, { label: "2", command: "지도" }, { label: "3", command: "지도" }, { label: "4", command: "지도" }, { label: "5", command: "보기" }]', context);
+  await submit('5');
+  if (!screenText().includes('=> 보기')) throw new Error('5번 추천 행동 선택 실패');
   if (!elements.diagnostics.textContent.includes('AI 유저 200명')) throw new Error('진단창 AI 유저 기본 숫자 표시 실패');
   await submit('유저');
   if (!screenText().includes('[접속자 200명]') || !screenText().includes('(결혼)')) throw new Error('AI 유저 200명/능력 표시 실패');
@@ -126,7 +131,7 @@ async function submit(command) {
   const seedBeforeGambling = seed;
   await submit('이동 주막');
   await submit('이동 도박장');
-  if (!screenText().includes('1. 블랙잭 50전') || !screenText().includes('4. 러시안룰렛 50전')) throw new Error('도박장 직접 선택지 표시 실패');
+  if (!screenText().includes('1. 블랙잭 50전') || !screenText().includes('4. 러시안룰렛 50전') || !screenText().includes('5. 블랙잭 올인')) throw new Error('도박장 직접 선택지 표시 실패');
   await submit('1');
   if (!screenText().includes('게임: 블랙잭') || (!screenText().includes('딜러 공개') && !screenText().includes('첫 두 장'))) throw new Error('블랙잭 실제 진행 표시 실패');
   await submit('스탠드');
