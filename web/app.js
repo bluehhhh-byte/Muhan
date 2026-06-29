@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.29.1';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -58,6 +58,7 @@ let aiWealth = {};
 let aiDebt = {};
 let economy = { index: 100, fund: 0, last: '광장 장터 개장', concepts: [], reputation: 0, contracts: [] };
 let nekoTraining = { combat: 0, luck: 0, counsel: 0 };
+let gambleState = { blackjack: null };
 
 function hashName(name) {
   return Array.from(name).reduce((hash, char) => hash + char.charCodeAt(0), 0);
@@ -1826,26 +1827,156 @@ function gambleStake(input = '') {
   return Math.max(10, Math.min(500, Math.floor(amount)));
 }
 
-function settleGamble(game, stake, win, detail, payout = stake * 2, loseEffect = null) {
+function settleGamble(game, stake, result, detail, payout = stake * 2, loseEffect = null) {
   if (!spendGold(stake, game)) return;
-  if (win) {
+  const outcome = result === 'push' || result === 'partial' ? result : result ? 'win' : 'lose';
+  if (outcome !== 'lose' && payout > 0) {
     character.gold += payout;
     economy.fund = Math.max(0, economy.fund - Math.floor(payout / 2));
+  }
+  if (outcome === 'win') {
     shiftReputation(1);
-  } else {
+  } else if (outcome === 'lose') {
     if (loseEffect) loseEffect();
     shiftReputation(game === '검은 룰렛' ? -2 : -1);
   }
   const detailText = typeof detail === 'function' ? detail() : detail;
-  shiftEconomy(win ? 1 : -1, '도박장 신용', `${game} ${stake}전 ${win ? '승리' : '패배'}`);
-  reflect(win ? '기쁨' : '불안', win ? '운은 노력의 반대가 아니라 위험을 감당한 뒤 남는 해석이다.' : '잃은 돈은 숫자지만, 잃은 판단은 다음 선택에 남는다.', `도박장: ${game}`);
+  const outcomeText = outcome === 'win' ? `승리 / 수령 ${payout}전` : outcome === 'push' ? `무승부 / 반환 ${payout}전` : outcome === 'partial' ? `부분 환급 ${payout}전` : '패배';
+  shiftEconomy(outcome === 'win' ? 1 : outcome === 'lose' ? -1 : 0, '도박장 신용', `${game} ${stake}전 ${outcomeText}`);
+  reflect(outcome === 'lose' ? '불안' : '기쁨', outcome === 'lose' ? '잃은 돈은 숫자지만, 잃은 판단은 다음 선택에 남는다.' : '운은 노력의 반대가 아니라 위험을 감당한 뒤 남는 해석이다.', `도박장: ${game}`);
   commitProgress();
-  append(`\n[도박장]\n게임: ${game}\n판돈: ${stake} 전\n${detailText}\n결과: ${win ? `승리 / 수령 ${payout}전` : '패배'}\n평판: ${economy.reputation}`, win ? 'ally' : 'choice');
+  append(`\n[도박장]\n게임: ${game}\n판돈: ${stake} 전\n${detailText}\n결과: ${outcomeText}\n평판: ${economy.reputation}`, outcome === 'lose' ? 'choice' : 'ally');
   showChoices();
 }
 
-function drawBlackjack() {
-  return Math.min(10, 1 + Math.floor(Math.random() * 13));
+function newDeck() {
+  const suits = ['♠', '♥', '♦', '♣'];
+  return suits.flatMap((suit) => Array.from({ length: 13 }, (_, index) => ({ rank: index + 2, suit })))
+    .sort(() => Math.random() - 0.5);
+}
+
+function drawCard(deck) {
+  return deck.pop();
+}
+
+function cardText(card) {
+  const labels = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
+  return `${labels[card.rank] || card.rank}${card.suit}`;
+}
+
+function cardsText(cards) {
+  return cards.map(cardText).join(' ');
+}
+
+function blackjackValue(cards) {
+  let total = cards.reduce((sum, card) => sum + (card.rank === 14 ? 11 : Math.min(10, card.rank)), 0);
+  let aces = cards.filter((card) => card.rank === 14).length;
+  while (total > 21 && aces) {
+    total -= 10;
+    aces -= 1;
+  }
+  return total;
+}
+
+function finishBlackjack(outcome, detail) {
+  const hand = gambleState.blackjack;
+  if (!hand) return;
+  const payout = outcome === 'blackjack' ? Math.round(hand.stake * 2.5) : outcome === 'win' ? hand.stake * 2 : outcome === 'push' ? hand.stake : 0;
+  if (payout) {
+    character.gold += payout;
+    economy.fund = Math.max(0, economy.fund - Math.floor(payout / 2));
+  }
+  shiftEconomy(outcome === 'lose' ? -1 : 1, '블랙잭 테이블', `블랙잭 ${hand.stake}전 ${outcome}`);
+  shiftReputation(outcome === 'lose' ? -1 : 1);
+  reflect(outcome === 'lose' ? '불안' : '기쁨', '카드를 더 받는 용기와 멈추는 용기는 서로 다른 기술이다.', '도박장: 블랙잭');
+  gambleState.blackjack = null;
+  commitProgress();
+  append(`\n[도박장]\n게임: 블랙잭\n판돈: ${hand.stake} 전\n내 패: ${cardsText(hand.player)} (${blackjackValue(hand.player)})\n딜러 패: ${cardsText(hand.dealer)} (${blackjackValue(hand.dealer)})\n${detail}\n결과: ${outcome === 'push' ? `푸시 / 반환 ${payout}전` : outcome === 'lose' ? '패배' : `승리 / 수령 ${payout}전`}`, outcome === 'lose' ? 'choice' : 'ally');
+  showChoices();
+}
+
+function startBlackjack(stake) {
+  if (!spendGold(stake, '블랙잭')) return;
+  const deck = newDeck();
+  const player = [drawCard(deck), drawCard(deck)];
+  const dealer = [drawCard(deck), drawCard(deck)];
+  gambleState.blackjack = { stake, deck, player, dealer };
+  if (blackjackValue(player) === 21 || blackjackValue(dealer) === 21) {
+    finishBlackjack(blackjackValue(player) === blackjackValue(dealer) ? 'push' : blackjackValue(player) === 21 ? 'blackjack' : 'lose', '첫 두 장에서 승부가 났다.');
+    return;
+  }
+  append(`\n[도박장]\n게임: 블랙잭\n판돈: ${stake} 전\n내 패: ${cardsText(player)} (${blackjackValue(player)})\n딜러 공개: ${cardText(dealer[0])}\n선택: 히트 / 스탠드`, 'room');
+  showChoices();
+}
+
+function blackjackHit() {
+  const hand = gambleState.blackjack;
+  if (!hand) {
+    append('진행 중인 블랙잭 판이 없습니다.');
+    showChoices();
+    return;
+  }
+  hand.player.push(drawCard(hand.deck));
+  if (blackjackValue(hand.player) > 21) {
+    finishBlackjack('lose', '버스트.');
+    return;
+  }
+  append(`\n[블랙잭]\n내 패: ${cardsText(hand.player)} (${blackjackValue(hand.player)})\n선택: 히트 / 스탠드`, 'room');
+  showChoices();
+}
+
+function blackjackStand() {
+  const hand = gambleState.blackjack;
+  if (!hand) {
+    append('스탠드할 블랙잭 판이 없습니다.');
+    showChoices();
+    return;
+  }
+  while (blackjackValue(hand.dealer) < 17) hand.dealer.push(drawCard(hand.deck));
+  const player = blackjackValue(hand.player);
+  const dealer = blackjackValue(hand.dealer);
+  const outcome = dealer > 21 || player > dealer ? 'win' : player === dealer ? 'push' : 'lose';
+  finishBlackjack(outcome, `딜러는 17 이상에서 멈췄다.`);
+}
+
+function straightHigh(ranks) {
+  const unique = [...new Set(ranks)].sort((a, b) => b - a);
+  if (unique.includes(14)) unique.push(1);
+  for (let index = 0; index <= unique.length - 5; index += 1) {
+    const run = unique.slice(index, index + 5);
+    if (run[0] - run[4] === 4) return run[0];
+  }
+  return 0;
+}
+
+function pokerHand(cards) {
+  const ranks = cards.map((card) => card.rank).sort((a, b) => b - a);
+  const bySuit = ['♠', '♥', '♦', '♣'].map((suit) => cards.filter((card) => card.suit === suit));
+  const flush = bySuit.find((items) => items.length >= 5)?.map((card) => card.rank).sort((a, b) => b - a) || [];
+  const straight = straightHigh(ranks);
+  const straightFlush = flush.length ? straightHigh(flush) : 0;
+  const counts = [...new Set(ranks)].map((rank) => [rank, ranks.filter((item) => item === rank).length])
+    .sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+  const four = counts.find(([, count]) => count === 4);
+  const trips = counts.filter(([, count]) => count === 3);
+  const pairs = counts.filter(([, count]) => count === 2);
+  const score = (name, values) => ({ name, values });
+  if (straightFlush) return score('스트레이트 플러시', [8, straightFlush]);
+  if (four) return score('포카드', [7, four[0], ...ranks.filter((rank) => rank !== four[0]).slice(0, 1)]);
+  if (trips.length && (pairs.length || trips.length > 1)) return score('풀하우스', [6, trips[0][0], (pairs[0] || trips[1])[0]]);
+  if (flush.length) return score('플러시', [5, ...flush.slice(0, 5)]);
+  if (straight) return score('스트레이트', [4, straight]);
+  if (trips.length) return score('트리플', [3, trips[0][0], ...ranks.filter((rank) => rank !== trips[0][0]).slice(0, 2)]);
+  if (pairs.length >= 2) return score('투페어', [2, pairs[0][0], pairs[1][0], ...ranks.filter((rank) => rank !== pairs[0][0] && rank !== pairs[1][0]).slice(0, 1)]);
+  if (pairs.length) return score('원페어', [1, pairs[0][0], ...ranks.filter((rank) => rank !== pairs[0][0]).slice(0, 3)]);
+  return score('하이카드', [0, ...ranks.slice(0, 5)]);
+}
+
+function comparePoker(a, b) {
+  for (let index = 0; index < Math.max(a.values.length, b.values.length); index += 1) {
+    if ((a.values[index] || 0) !== (b.values[index] || 0)) return (a.values[index] || 0) - (b.values[index] || 0);
+  }
+  return 0;
 }
 
 function gamble(input = '') {
@@ -1856,31 +1987,42 @@ function gamble(input = '') {
   }
   const stake = gambleStake(input);
   if (/블랙잭|blackjack/i.test(input)) {
-    const player = drawBlackjack() + drawBlackjack() + (Math.random() > 0.55 ? drawBlackjack() : 0);
-    const dealer = drawBlackjack() + drawBlackjack() + (Math.random() > 0.45 ? drawBlackjack() : 0);
-    const win = player <= 21 && (dealer > 21 || player >= dealer);
-    settleGamble('블랙잭', stake, win, `주인공 ${player} / 딜러 ${dealer}`);
+    startBlackjack(stake);
     return;
   }
   if (/파칭코|pachinko/i.test(input)) {
-    const roll = Math.random() + nekoProfile().luck / 180;
-    const multiplier = roll > 0.96 ? 6 : roll > 0.82 ? 3 : roll > 0.58 ? 1.5 : 0;
-    settleGamble('파칭코', stake, multiplier > 0, `구슬 흐름 배율 x${multiplier}`, Math.round(stake * multiplier));
+    const balls = Math.max(3, Math.min(20, Math.floor(stake / 10)));
+    let payout = 0;
+    const slots = Array.from({ length: balls }, () => {
+      let pos = 0;
+      for (let row = 0; row < 7; row += 1) pos += Math.random() > 0.5 ? 1 : -1;
+      const multiplier = pos === 0 ? 5 : Math.abs(pos) === 1 ? 2 : Math.abs(pos) === 2 ? 1 : 0;
+      payout += Math.round((stake / balls) * multiplier);
+      return pos;
+    });
+    settleGamble('파칭코', stake, payout > stake ? true : payout === stake ? 'push' : payout > 0 ? 'partial' : false, `구슬 ${balls}개 / 슬롯 ${slots.join(', ')} / 환급 ${payout}전`, payout);
     return;
   }
   if (/텍사스|포커|poker/i.test(input)) {
-    const roll = Math.random() + economy.index / 300;
-    const rank = roll > 1.08 ? ['풀하우스', 5] : roll > 0.92 ? ['플러시', 3] : roll > 0.7 ? ['원페어', 2] : ['하이카드', 0];
-    settleGamble('텍사스포커', stake, rank[1] > 0, `패: ${rank[0]}`, stake * rank[1]);
+    const deck = newDeck();
+    const player = [drawCard(deck), drawCard(deck)];
+    const dealer = [drawCard(deck), drawCard(deck)];
+    const board = [drawCard(deck), drawCard(deck), drawCard(deck), drawCard(deck), drawCard(deck)];
+    const playerHand = pokerHand(player.concat(board));
+    const dealerHand = pokerHand(dealer.concat(board));
+    const result = comparePoker(playerHand, dealerHand);
+    const payout = result > 0 ? stake * 2 : result === 0 ? stake : 0;
+    settleGamble('텍사스포커', stake, result > 0 ? true : result === 0 ? 'push' : false, `내 패: ${cardsText(player)} / 딜러 패: ${cardsText(dealer)}\n보드: ${cardsText(board)}\n족보: ${playerHand.name} vs ${dealerHand.name}`, payout);
     return;
   }
   if (/러시안|룰렛|roulette/i.test(input)) {
-    const safe = Math.random() + economy.reputation / 300 > 0.18;
+    const chamber = 1 + Math.floor(Math.random() * 6);
+    const safe = chamber !== 1;
     settleGamble(
       '검은 룰렛',
       stake,
       safe,
-      () => (safe ? '검은 칸을 피했다.' : `위험 칸. HP ${character.hp}/${character.hpMax}`),
+      () => (safe ? `6칸 중 ${chamber}번. 위험 칸을 피했다.` : `6칸 중 1번 위험 칸. HP ${character.hp}/${character.hpMax}`),
       stake * 4,
       () => { character.hp = Math.max(1, character.hp - (3 + character.level)); }
     );
@@ -2580,6 +2722,14 @@ function bestAutoMoveChoice() {
 }
 
 function makeChoices() {
+  if (gambleState.blackjack) {
+    return [
+      { label: '히트', command: '히트' },
+      { label: '스탠드', command: '스탠드' },
+      { label: '블랙잭 규칙 보기', command: '도박' },
+      { label: '판 포기 후 주막', command: '이동 주막' }
+    ];
+  }
   if (roomName === '도박장') {
     return [
       { label: '블랙잭 50전', command: '도박 블랙잭 50' },
@@ -2928,6 +3078,7 @@ function move(destination) {
   }
 
   roomName = target;
+  if (roomName !== '도박장') gambleState.blackjack = null;
   visitedRooms.add(roomName);
   autoRoomActions = 0;
   autoRoomCommands = [];
@@ -3097,6 +3248,8 @@ async function runCommand(raw) {
   else if (['정보구매', '정보상', '소문구매'].includes(command)) buyInformation(body);
   else if (['치료소', '부상치료', '저주해제', '요양'].includes(command)) paidCare(`${command} ${body}`);
   else if (['경제', '투자', '파산', '고용', '기부'].includes(command)) economyEvent(`${command} ${body}`);
+  else if (['히트', 'hit'].includes(command)) blackjackHit();
+  else if (['스탠드', 'stand'].includes(command)) blackjackStand();
   else if (command === '도박장') {
     if (roomName !== '도박장' && rooms[roomName].exits.includes('도박장')) move('도박장');
     else gamble(body);
