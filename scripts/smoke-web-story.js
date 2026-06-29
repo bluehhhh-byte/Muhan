@@ -90,6 +90,8 @@ context.globalThis = context;
 vm.runInNewContext(fs.readFileSync('web/app.js', 'utf8'), context, { filename: 'web/app.js' });
 const allInStakes = vm.runInNewContext('(() => { const old = character.gold; character.gold = 777; const stakes = ["도박 블랙잭 올인", "도박 파칭코 올인", "도박 텍사스포커 올인", "도박 러시안룰렛 올인"].map(gambleStake); character.gold = old; return stakes; })()', context);
 if (!allInStakes.every((stake) => stake === 777)) throw new Error('도박 올인 판돈 계산 실패');
+const passiveCash = vm.runInNewContext('(() => { const old = character.gold; character.gold = 0; aiSocietyEvent("상단", true); const passive = character.gold; aiSocietyEvent("상단"); const explicit = character.gold; character.gold = old; return [passive, explicit]; })()', context);
+if (passiveCash[0] !== 0 || passiveCash[1] !== 15) throw new Error('자동 사회 사건 현금 생성 차단 실패');
 
 function screenText() {
   return elements.gameScreen.children.map((child) => child.textContent).join('\n');

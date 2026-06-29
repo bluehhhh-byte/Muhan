@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.4';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.5';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -3001,7 +3001,7 @@ function pickAiUserByAbility(ability, except = []) {
   return names.find((name) => aiAbility(name) === ability && !except.includes(name));
 }
 
-function aiSocietyEvent(requestedAbility = '') {
+function aiSocietyEvent(requestedAbility = '', passive = false) {
   if (names.length < 2) return;
   const ability = aiAbilityCatalog.includes(requestedAbility.trim()) ? requestedAbility.trim() : '';
   const actor = ability ? pickAiUserByAbility(ability) || pick(names) : pick(names);
@@ -3047,8 +3047,8 @@ function aiSocietyEvent(requestedAbility = '') {
     character.hp = Math.min(character.hpMax, character.hp + 6);
     text = `${actor}이(가) ${target}을(를) 치료했다.${character.hp > before ? ' 당신도 작은 회복을 받았다.' : ''}`;
   } else if (power === '상단') {
-    character.gold += 15;
-    text = `${actor}의 상단이 ${target}와 거래했다. 통행세 일부로 15전을 받았다.\n${applyEconomyEvent('고용', actor, target)}`;
+    if (!passive) character.gold += 15;
+    text = `${actor}의 상단이 ${target}와 거래했다.${passive ? ' 돈은 AI 유저들 사이에서만 돌았다.' : ' 통행세 일부로 15전을 받았다.'}\n${applyEconomyEvent('고용', actor, target)}`;
   } else if (power === '소문') {
     text = `${actor}이(가) ${target}에게 새 소문을 퍼뜨렸다. 네코가 그 흐름을 기억했다.`;
     rememberNeko('대화', `${actor} 소문`, 1);
@@ -3225,7 +3225,7 @@ function blueprint() {
 function ambientChat() {
   if (!connected) return;
   if (Math.random() > 0.82) {
-    aiSocietyEvent();
+    aiSocietyEvent('', true);
     return;
   }
   const user = team.length && Math.random() > 0.55 ? pick(team) : pick(roomUsers());
