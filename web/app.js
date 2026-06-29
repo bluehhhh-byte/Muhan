@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.1';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.2';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -1222,14 +1222,34 @@ function currentAutoMode() {
   return autoModes[autoModeEl?.value] ? autoModeEl.value : 'story';
 }
 
+function modeKey(text = '') {
+  return String(text).replace(/\s+/g, '').toLowerCase();
+}
+
+function syncAutoModeOptions() {
+  if (!autoModeEl) return;
+  const existing = new Set(Array.from(autoModeEl.children || []).map((option) => option.value));
+  Object.entries(autoModes).forEach(([value, label]) => {
+    if (existing.has(value)) return;
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    autoModeEl.appendChild(option);
+  });
+  if (!autoModes[autoModeEl.value]) autoModeEl.value = 'story';
+}
+
 function setAutoMode(input = '') {
   const value = input.trim();
+  const normalized = modeKey(value);
   const mode = Object.keys(autoModes).find((key) => key === value)
-    || Object.keys(autoModes).find((key) => autoModes[key].includes(value));
+    || Object.keys(autoModes).find((key) => modeKey(key) === normalized)
+    || Object.keys(autoModes).find((key) => modeKey(autoModes[key]).includes(normalized));
   if (!mode) {
     append(`자동 목표: ${Object.entries(autoModes).map(([key, label]) => `${key}=${label}`).join(' / ')}`);
     return;
   }
+  syncAutoModeOptions();
   autoModeEl.value = mode;
   saveGameState();
   renderStatusPanel();
@@ -3352,6 +3372,7 @@ window.addEventListener('beforeunload', () => {
 
 ensureAiUsers(200);
 loadSettings();
+syncAutoModeOptions();
 loadGameState();
 setConnected(false);
 renderStatusPanel();

@@ -100,6 +100,12 @@ async function submit(command) {
 
 (async () => {
   elements.gameConnect.listeners.click();
+  if (!elements.autoMode.children.some((option) => option.value === 'gamble')) throw new Error('도박 자동 목표 옵션 누락');
+  elements.autoMode.value = 'gamble';
+  elements.autoMode.listeners.change();
+  if (!elements.statusPanel.textContent.includes('자동 목표: 도박 우선')) throw new Error('도박 자동 목표 드롭다운 선택 실패');
+  elements.autoMode.value = 'story';
+  elements.autoMode.listeners.change();
   if (!elements.diagnostics.textContent.includes('AI 유저 200명')) throw new Error('진단창 AI 유저 기본 숫자 표시 실패');
   await submit('유저');
   if (!screenText().includes('[접속자 200명]') || !screenText().includes('(결혼)')) throw new Error('AI 유저 200명/능력 표시 실패');
@@ -132,6 +138,8 @@ async function submit(command) {
   if (!elements.statusPanel.textContent.includes('도박장 신용')) throw new Error('도박장 경제 반영 실패');
   await submit('자동목표 도박');
   if (!elements.statusPanel.textContent.includes('자동 목표: 도박 우선')) throw new Error('도박 자동 목표 변경 실패');
+  await submit('자동목표 도박우선');
+  if (!elements.statusPanel.textContent.includes('자동 목표: 도박 우선')) throw new Error('도박 자동 목표 붙여쓰기 변경 실패');
   await submit('자동');
   await context.autoTick();
   if (!screenText().includes('=> 도박 ')) throw new Error('도박 우선 자동 진행 실패');
