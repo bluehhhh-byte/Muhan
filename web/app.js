@@ -6,7 +6,7 @@ const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.3';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.4';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -2062,7 +2062,7 @@ function gamble(input = '') {
     );
     return;
   }
-  append('\n[도박장]\n도박 블랙잭 50\n도박 파칭코 50\n도박 텍사스포커 50\n도박 러시안룰렛 50\n도박 블랙잭 올인\n네코: 이곳은 돈보다 판단력이 먼저 닳는 장소야.', 'room');
+  append('\n[도박장]\n도박 블랙잭 50\n도박 파칭코 50\n도박 텍사스포커 50\n도박 러시안룰렛 50\n도박 블랙잭 올인\n도박 파칭코 올인\n도박 텍사스포커 올인\n도박 러시안룰렛 올인\n네코: 이곳은 돈보다 판단력이 먼저 닳는 장소야.', 'room');
   showChoices();
 }
 
@@ -2786,7 +2786,10 @@ function makeChoices() {
       { label: '파칭코 50전', command: '도박 파칭코 50' },
       { label: '텍사스포커 50전', command: '도박 텍사스포커 50' },
       { label: '러시안룰렛 50전', command: '도박 러시안룰렛 50' },
-      { label: '블랙잭 올인', command: '도박 블랙잭 올인' }
+      { label: '블랙잭 올인', command: '도박 블랙잭 올인' },
+      { label: '파칭코 올인', command: '도박 파칭코 올인' },
+      { label: '텍사스포커 올인', command: '도박 텍사스포커 올인' },
+      { label: '러시안룰렛 올인', command: '도박 러시안룰렛 올인' }
     ];
   }
   const room = rooms[roomName];

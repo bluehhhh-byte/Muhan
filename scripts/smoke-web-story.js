@@ -88,8 +88,8 @@ const context = {
 context.globalThis = context;
 
 vm.runInNewContext(fs.readFileSync('web/app.js', 'utf8'), context, { filename: 'web/app.js' });
-const allInStake = vm.runInNewContext('(() => { const old = character.gold; character.gold = 777; const stake = gambleStake("도박 블랙잭 올인"); character.gold = old; return stake; })()', context);
-if (allInStake !== 777) throw new Error('도박 올인 판돈 계산 실패');
+const allInStakes = vm.runInNewContext('(() => { const old = character.gold; character.gold = 777; const stakes = ["도박 블랙잭 올인", "도박 파칭코 올인", "도박 텍사스포커 올인", "도박 러시안룰렛 올인"].map(gambleStake); character.gold = old; return stakes; })()', context);
+if (!allInStakes.every((stake) => stake === 777)) throw new Error('도박 올인 판돈 계산 실패');
 
 function screenText() {
   return elements.gameScreen.children.map((child) => child.textContent).join('\n');
@@ -131,7 +131,7 @@ async function submit(command) {
   const seedBeforeGambling = seed;
   await submit('이동 주막');
   await submit('이동 도박장');
-  if (!screenText().includes('1. 블랙잭 50전') || !screenText().includes('4. 러시안룰렛 50전') || !screenText().includes('5. 블랙잭 올인')) throw new Error('도박장 직접 선택지 표시 실패');
+  if (!screenText().includes('1. 블랙잭 50전') || !screenText().includes('4. 러시안룰렛 50전') || !screenText().includes('5. 블랙잭 올인') || !screenText().includes('8. 러시안룰렛 올인')) throw new Error('도박장 직접 선택지 표시 실패');
   await submit('1');
   if (!screenText().includes('게임: 블랙잭') || (!screenText().includes('딜러 공개') && !screenText().includes('첫 두 장'))) throw new Error('블랙잭 실제 진행 표시 실패');
   await submit('스탠드');
