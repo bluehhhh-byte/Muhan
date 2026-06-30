@@ -7,7 +7,7 @@ const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
 const SAVE_VERSION = 5;
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.31.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.31.1';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -841,6 +841,7 @@ let autoBusy = false;
 let autoRoomActions = 0;
 let autoRoomCommands = [];
 let autoShopCooldown = 0;
+let autoStallCount = 0;
 let autoStrategy = '균형';
 let frontierPhaseIndex = 0;
 let visitedRooms = new Set([roomName]);
@@ -3271,6 +3272,21 @@ function freshAutoChoice(choice) {
   return autoAlternatives().find((item) => !autoRoomCommands.includes(item.command)) || choice;
 }
 
+function safeAutoFallbackChoice(mode = currentAutoMode()) {
+  if (character.hp <= Math.ceil(character.hpMax * 0.35) && character.hp < character.hpMax) {
+    return { label: '비상 회복', command: '회복' };
+  }
+  if (mode === 'frontier') {
+    return frontierCoord(roomName)
+      ? { label: '무한구역 상태 점검', command: '조사' }
+      : bestFrontierMoveChoice();
+  }
+  return eventChoice()
+    || (encountersForRoom(roomName).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null)
+    || bestAutoMoveChoice()
+    || { label: '현재 상태 확인', command: '상태' };
+}
+
 function bestAutoChoice() {
   const choices = makeChoices().filter((choice) => !choice.command.startsWith('네코'));
   const mode = currentAutoMode();
@@ -3320,17 +3336,25 @@ function setAutoButton() {
 
 async function autoTick() {
   if (!connected || !autoProgress || autoBusy) return;
-  const mode = currentAutoMode();
-  const forcedMove = autoRoomActions >= balanceConfig.autoRoomActionLimit && mode !== 'gamble' && !(mode === 'frontier' && frontierCoord(roomName))
-    ? (mode === 'frontier' ? bestFrontierMoveChoice() : bestAutoMoveChoice())
-    : null;
-  const choice = forcedMove || (mode === 'gamble' ? bestAutoChoice() : freshAutoChoice(bestAutoChoice()));
-  if (!choice) return;
   autoBusy = true;
-  const beforeRoom = roomName;
-  const wasShopRoom = canShopHere();
-  append(`\n[자동 진행]\n${forcedMove ? `장소 행동 ${balanceConfig.autoRoomActionLimit}회 완료. ` : ''}네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
   try {
+    const mode = currentAutoMode();
+    const forcedMove = autoRoomActions >= balanceConfig.autoRoomActionLimit && mode !== 'gamble' && !(mode === 'frontier' && frontierCoord(roomName))
+      ? (mode === 'frontier' ? bestFrontierMoveChoice() : bestAutoMoveChoice())
+      : null;
+    let choice = forcedMove || (mode === 'gamble' ? bestAutoChoice() : freshAutoChoice(bestAutoChoice()));
+    if (!choice) {
+      autoStallCount += 1;
+      choice = autoStallCount >= 2 ? safeAutoFallbackChoice(mode) : null;
+    }
+    if (!choice) {
+      append('\n[자동 진행]\n네코가 다음 행동을 찾지 못해 잠깐 대기합니다. "계획" 또는 "도움 자동"을 확인하세요.', 'neko');
+      return;
+    }
+    autoStallCount = 0;
+    const beforeRoom = roomName;
+    const wasShopRoom = canShopHere();
+    append(`\n[자동 진행]\n${forcedMove ? `장소 행동 ${balanceConfig.autoRoomActionLimit}회 완료. ` : ''}네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
     await runCommand(choice.command);
     if (wasShopRoom && isShopCommand(choice.command)) autoShopCooldown = 3;
     else if (autoShopCooldown > 0) autoShopCooldown -= 1;
@@ -3341,6 +3365,9 @@ async function autoTick() {
       autoRoomActions += 1;
       autoRoomCommands.push(choice.command);
     }
+  } catch (error) {
+    append(`\n[자동 오류]\n자동 진행을 멈췄습니다. ${error.message || error}\n네코: 화면이 멈춘 게 아니라, 내가 꼬리를 밟은 거야. 상태를 보존했으니 다시 켜도 돼.`, 'neko');
+    setAutoProgress(false);
   } finally {
     autoBusy = false;
   }
@@ -3356,6 +3383,7 @@ function setAutoProgress(value) {
     autoRoomActions = 0;
     autoRoomCommands = [];
     autoShopCooldown = 0;
+    autoStallCount = 0;
     autoTimer = window.setInterval(autoTick, nekoProfile().autoDelay);
     appendNeko('자동 진행을 시작할게. 위험하면 언제든 다시 눌러서 멈춰.');
   } else if (connected) {

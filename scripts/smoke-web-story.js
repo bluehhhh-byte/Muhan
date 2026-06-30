@@ -124,6 +124,8 @@ async function submit(command) {
 
 (async () => {
   elements.gameConnect.listeners.click();
+  const autoCrashGuard = await vm.runInNewContext('(async () => { const oldConnected = connected; const oldAuto = autoProgress; const oldBusy = autoBusy; const oldBest = bestAutoChoice; connected = true; autoProgress = true; autoBusy = false; bestAutoChoice = () => { throw new Error("테스트 자동 오류"); }; await autoTick(); const result = [autoProgress, autoBusy, screenEl.children.map((child) => child.textContent).join("\\n").includes("[자동 오류]")]; bestAutoChoice = oldBest; connected = oldConnected; autoProgress = oldAuto; autoBusy = oldBusy; setAutoButton(); return result; })()', context);
+  if (autoCrashGuard[0] !== false || autoCrashGuard[1] !== false || !autoCrashGuard[2]) throw new Error('자동 진행 오류 복구 실패');
   if (!elements.autoMode.children.some((option) => option.value === 'gamble')) throw new Error('도박 자동 목표 옵션 누락');
   elements.autoMode.value = 'gamble';
   elements.autoMode.listeners.change();
