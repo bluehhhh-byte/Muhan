@@ -5,9 +5,9 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.9';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.31.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -100,13 +100,20 @@ const commandAliases = {
 };
 const balanceConfig = {
   frontierEnemyPower: FRONTIER_ENEMY_POWER,
+  frontierLevelMultiplier: 2.6,
+  frontierHpScale: 1.55,
+  frontierRewardScale: 2.35,
+  frontierBossEveryDepth: 6,
+  frontierRelicEveryKills: 3,
+  frontierCurseEveryDepth: 5,
   initialAiUsers: 200,
   maxAiUsers: 300,
   maxScars: 8,
   maxGoldLog: 5,
   maxEconomyConcepts: 8,
   autoRoomActionLimit: 2,
-  defaultGambleStake: 50
+  defaultGambleStake: 50,
+  rouletteSafePayoutRate: 1.15
 };
 
 let names = [
@@ -310,6 +317,12 @@ function statusSummaryLines() {
 
 function frontierCoord(name) {
   return canonicalRoomName(name) === FRONTIER_ROOM ? { row: 1, col: 1 } : null;
+}
+
+function frontierDepth(room = roomName) {
+  if (!frontierCoord(room)) return 0;
+  if (rogue.active) return Math.max(1, Number(rogue.depth) || 1, rogue.kills + 1);
+  return Math.max(1, Math.floor((character.level - 1) / 2) + 1);
 }
 
 function frontierRegion(name) {
@@ -522,8 +535,8 @@ function frontierEncounters(room = roomName) {
   const coord = frontierCoord(room);
   if (!coord) return [];
   const special = frontierSpecial(room);
-  const depth = coord.row + coord.col;
-  const base = 22 + depth * 5;
+  const depth = frontierDepth(room);
+  const base = 18 + depth * 4;
   const firstName = `${pick(frontierPrefixes)} ${frontierMonsterNames[(coord.row + coord.col) % frontierMonsterNames.length]}`;
   const secondName = `${pick(frontierPrefixes)} ${frontierMonsterNames[(coord.row * 3 + coord.col * 5) % frontierMonsterNames.length]}`;
   const traits = Object.keys(monsterTraits);
@@ -545,7 +558,8 @@ function frontierEncounters(room = roomName) {
       trait: traits[(depth + coord.row) % traits.length]
     }
   ];
-  return special?.type === 'boss' ? [special.monster].concat(encounters) : encounters;
+  const bossDepth = !rogue.active || depth % balanceConfig.frontierBossEveryDepth === 0;
+  return special?.type === 'boss' && bossDepth ? [special.monster].concat(encounters) : encounters;
 }
 
 function frontierSceneText(room = roomName) {
@@ -554,7 +568,7 @@ function frontierSceneText(room = roomName) {
   const region = frontierRegion(room);
   const landmark = pick(frontierLandmarks);
   const scene = pickFresh(frontierScenes);
-  const depth = coord.row + coord.col - 1;
+  const depth = frontierDepth(room);
   const special = frontierSpecial(room);
   const phase = currentFrontierPhase();
   return `${region.name}, ${landmark}. ${scene}. 압축 깊이감 ${depth} / 적 전투력 x${FRONTIER_ENEMY_POWER} / 위상: ${phase.name}${special ? ` / ${special.label}` : ''}`;
@@ -622,32 +636,37 @@ function monsterLevelFor(room, monster) {
     '초보사냥터': 0,
     '북문': 0,
     '북문 밖 숲': 1,
-    '폐광 입구': 2
+    '폐광 입구': 1
   }[room] || 0;
-  const frontierOffset = coord ? Math.floor((coord.row + coord.col - 2) / 4) : 0;
+  const frontierOffset = coord ? Math.floor((frontierDepth(room) - 1) / 2) : 0;
   const bossOffset = monster.trait === '우두머리' && coord ? 2 : 0;
   const baseLevel = Math.max(1, character.level + roomOffset + frontierOffset + bossOffset);
-  return coord ? baseLevel * FRONTIER_ENEMY_POWER : baseLevel;
+  return coord ? Math.max(1, Math.round(baseLevel * balanceConfig.frontierLevelMultiplier)) : baseLevel;
 }
 
 function scaleMonster(monster, room = roomName) {
   const coord = frontierCoord(room);
   const phase = coord ? currentFrontierPhase() : null;
+  const depth = coord ? frontierDepth(room) : 0;
   const level = monsterLevelFor(room, monster);
-  const normalLevel = coord ? Math.max(1, Math.round(level / FRONTIER_ENEMY_POWER)) : level;
-  const levelRate = 1 + (normalLevel - 1) * 0.18;
-  const overLevelRate = 1 + Math.max(0, level - character.level) * 0.08;
-  const expFloor = Math.round(expForLevel(character.level) * (0.16 + Math.max(0, level - character.level) * 0.03));
-  const goldFloor = 35 + level * 32;
+  const normalLevel = coord ? Math.max(1, level / balanceConfig.frontierLevelMultiplier) : level;
+  const levelRate = 1 + (normalLevel - 1) * 0.16 + depth * 0.035;
+  const overLevelRate = 1 + Math.max(0, level - character.level) * (coord ? 0.025 : 0.08);
+  const frontierReward = coord ? balanceConfig.frontierRewardScale : 1;
+  const expFloor = Math.round(expForLevel(character.level) * (coord
+    ? 0.14 + Math.max(0, level - character.level) * 0.008
+    : 0.16 + Math.max(0, level - character.level) * 0.03));
+  const goldFloor = coord ? 60 + level * 14 + depth * 18 : 35 + level * 32;
+  const bossHpRate = coord && monster.trait === '우두머리' ? 0.48 : 1;
   const bonusItem = level >= 5 && (monster.trait === '우두머리' || level % 3 === 0)
     ? `Lv.${level} ${monster.trait || '전투'} 전리품`
     : '';
   return {
     ...monster,
     level,
-    hp: Math.round(monster.hp * levelRate * overLevelRate * (coord ? FRONTIER_ENEMY_POWER : 1) * (phase?.hpRate || 1)),
-    exp: Math.max(Math.round(monster.exp * levelRate * (coord ? FRONTIER_ENEMY_POWER : 1) * (phase?.expRate || 1)), expFloor),
-    gold: Math.max(Math.round(monster.gold * (1 + level * 0.08) * (coord ? FRONTIER_ENEMY_POWER : 1) * (phase?.goldRate || 1)), goldFloor),
+    hp: Math.round(monster.hp * levelRate * overLevelRate * (coord ? balanceConfig.frontierHpScale : 1) * bossHpRate * (phase?.hpRate || 1)),
+    exp: Math.max(Math.round(monster.exp * levelRate * frontierReward * (phase?.expRate || 1)), expFloor),
+    gold: Math.max(Math.round(monster.gold * (1 + normalLevel * 0.07) * frontierReward * (phase?.goldRate || 1)), goldFloor),
     threat: coord ? `x${FRONTIER_ENEMY_POWER}` : '',
     phase: phase?.name || '',
     phaseWarning: phase?.warning || '',
@@ -671,20 +690,28 @@ function checkLabel(margin) {
 }
 
 function combatDiceResult(monster, attackPower, guardPower, traitDamage, gearEffects) {
-  const rounds = 5;
+  const isFrontierCombat = Boolean(frontierCoord(roomName));
+  const isBoss = monster.trait === '우두머리';
+  const rounds = 5 + (isFrontierCombat ? 1 : 0) + (isFrontierCombat && isBoss ? 1 : 0);
   let totalDamage = 0;
   let monsterHp = monster.hp;
   const lines = Array.from({ length: rounds }, (_, index) => {
     const heroDice = rollD36Pair();
     const monsterDice = rollD36Pair();
-    const heroScore = heroDice.total + Math.floor(attackPower / 3) + (index === 0 ? 2 : 0);
-    const monsterScore = monsterDice.total + monster.level * 2 + Math.floor(traitDamage / 2);
+    const heroScore = heroDice.total + Math.floor(attackPower / (isFrontierCombat ? 2.35 : 2.75)) + (index === 0 ? 2 : 0);
+    const monsterScore = monsterDice.total + Math.floor(monster.level * (isFrontierCombat ? 0.85 : 1.15)) + Math.floor(traitDamage / 2);
     const margin = heroScore - monsterScore;
     const label = checkLabel(margin);
     const roundDamage = label === '실패'
       ? 0
-      : Math.max(1, Math.round(attackPower * (label === '방어' ? 0.45 : 0.9) + Math.max(0, margin) * 0.7));
-    const counter = Math.max(0, Math.round(monster.level + traitDamage + Math.max(0, -margin) * 0.35 - guardPower * 0.35 - gearEffects.damageReduction));
+      : Math.max(1, Math.round(attackPower * (label === '방어' ? 0.5 : 0.95) + Math.max(0, margin) * 0.75));
+    const counter = Math.max(0, Math.round(
+      monster.level * (isFrontierCombat ? 0.55 : 0.85)
+      + traitDamage
+      + Math.max(0, -margin) * 0.25
+      - guardPower * 0.5
+      - gearEffects.damageReduction
+    ));
     monsterHp = Math.max(0, monsterHp - roundDamage);
     totalDamage += counter;
     return `${index + 1}턴: 주인공 ${heroDice.first}+${heroDice.second}+보정=${heroScore} / 몬스터 ${monsterDice.first}+${monsterDice.second}+보정=${monsterScore} / ${label} / 몬스터 HP ${monsterHp}/${monster.hp} / 반격 ${counter}`;
@@ -697,7 +724,7 @@ function combatDiceResult(monster, attackPower, guardPower, traitDamage, gearEff
     monsterHp = 0;
     lines.push('마무리: 적의 자세가 무너져 끝장을 냈다.');
   }
-  const floorDamage = Math.max(1, Math.ceil(monster.hp * 0.22) + traitDamage - guardPower - gearEffects.damageReduction);
+  const floorDamage = Math.max(1, Math.ceil(monster.hp * (isFrontierCombat ? 0.12 : 0.18)) + traitDamage - guardPower - gearEffects.damageReduction);
   return {
     text: lines.join('\n'),
     defeated: monsterHp <= 0,
@@ -939,11 +966,11 @@ function rogueNodeType(name = roomName) {
   const coord = frontierCoord(name);
   if (!coord) return '';
   const special = frontierSpecial(name);
-  const depth = coord.row + coord.col - 1;
-  if (special?.type === 'safe') return '안전';
-  if (special?.type === 'heal') return '휴식';
-  if (special?.type === 'shop') return '상점';
-  if (special?.type === 'boss') return '보스';
+  const depth = frontierDepth(name);
+  if (special?.type === 'safe' && !rogue.active) return '안전';
+  if (special?.type === 'heal' && !rogue.active) return '휴식';
+  if (special?.type === 'shop' && !rogue.active) return '상점';
+  if (special?.type === 'boss' && (!rogue.active || depth % balanceConfig.frontierBossEveryDepth === 0)) return '보스';
   if (depth % 5 === 0) return '휴식';
   if (depth % 4 === 0) return '정예';
   return '전투';
@@ -1011,7 +1038,7 @@ function addRogueCurse(reason = '깊은 원정') {
 function enterRogueRoom() {
   const coord = frontierCoord(roomName);
   if (!rogue.active || !coord) return;
-  const depth = coord.row + coord.col - 1;
+  const depth = frontierDepth(roomName);
   rogue.depth = depth;
   rogue.maxDepth = Math.max(rogue.maxDepth, depth);
   rogue.bestDepth = Math.max(rogue.bestDepth, depth);
@@ -1019,7 +1046,19 @@ function enterRogueRoom() {
     rogue.nodes.push(roomName);
     append(`[원정 노드] 깊이 ${depth} / ${rogueNodeType()} / ${frontierRegion(roomName).name}`, 'choice');
   }
-  while (rogue.curses.length < Math.floor(depth / 5)) addRogueCurse(`깊이 ${depth}`);
+  while (rogue.curses.length < Math.floor(depth / balanceConfig.frontierCurseEveryDepth)) addRogueCurse(`깊이 ${depth}`);
+}
+
+function advanceRogueDepth(reason = '전투') {
+  if (!rogue.active || !frontierCoord(roomName)) return;
+  const depth = Math.max(1, rogue.kills + 1);
+  rogue.depth = depth;
+  rogue.maxDepth = Math.max(rogue.maxDepth, depth);
+  rogue.bestDepth = Math.max(rogue.bestDepth, depth);
+  if (depth === 1 || depth % 2 === 0) {
+    append(`[원정 깊이] ${reason} 이후 깊이 ${depth} / 노드 ${rogueNodeType()}`, 'choice');
+  }
+  while (rogue.curses.length < Math.floor(depth / balanceConfig.frontierCurseEveryDepth)) addRogueCurse(`깊이 ${depth}`);
 }
 
 function startRogueRun() {
@@ -1132,8 +1171,9 @@ function buyShardUpgrade(input = '') {
 function recordRogueCombat(monster) {
   if (!rogue.active) return;
   rogue.kills += 1;
+  advanceRogueDepth(monster.name);
   const node = rogueNodeType();
-  if (node === '보스' || node === '정예' || rogue.kills % 3 === 0) {
+  if (node === '정예' || node === '보스' || rogue.kills % balanceConfig.frontierRelicEveryKills === 0) {
     grantRogueRelic(`${node} 승리`);
   }
   const healed = rogueAfterCombatHeal();
@@ -2089,7 +2129,7 @@ function isAllIn(input = '') {
 
 function gambleStake(input = '') {
   if (isAllIn(input)) return Math.max(0, Math.floor(character.gold));
-  const amount = Number((input.match(/\d+/) || [])[0]) || 50;
+  const amount = Number((input.match(/\d+/) || [])[0]) || balanceConfig.defaultGambleStake;
   return Math.max(10, Math.min(500, Math.floor(amount)));
 }
 
@@ -2334,8 +2374,8 @@ function gamble(input = '') {
       stake,
       safe,
       () => (safe ? `6칸 중 ${chamber}번. 위험 칸을 피했다.` : `6칸 중 1번 위험 칸. HP ${character.hp}/${character.hpMax}`),
-      stake * 4,
-      () => { character.hp = Math.max(1, character.hp - (3 + character.level)); }
+      Math.round(stake * balanceConfig.rouletteSafePayoutRate),
+      () => { character.hp = Math.max(1, character.hp - Math.max(6, Math.round(character.hpMax * 0.25))); }
     );
     return;
   }

@@ -106,8 +106,12 @@ const scarTest = vm.runInNewContext('(() => { const oldScars = character.scars.s
 if (scarTest[0] !== 1 || !scarTest[1].includes('흉터') || !scarTest[2]) throw new Error('패배 흉터/보정 실패');
 vm.runInNewContext('(() => { const oldGold = character.gold; const oldDebt = character.gambleDebt; const oldFragments = rogue.fragments; const oldGoldLog = goldLog.slice(); const oldStrategy = autoStrategy; const oldPhase = frontierPhaseIndex; const oldScars = character.scars.slice(); changeGold(12, "테스트 수입"); rogue.fragments = 2; character.gambleDebt = 9; autoStrategy = "파밍"; frontierPhaseIndex = 2; character.scars = [{ name: "테스트 흉터" }]; saveGameState(); character.gold = oldGold; character.gambleDebt = oldDebt; rogue.fragments = oldFragments; goldLog = oldGoldLog; autoStrategy = oldStrategy; frontierPhaseIndex = oldPhase; character.scars = oldScars; })()', context);
 const savedState = JSON.parse(storage['muhan.game.state']);
-if (savedState.saveVersion !== 4 || savedState.autoStrategy !== '파밍' || savedState.frontierPhaseIndex !== 2 || !Array.isArray(savedState.goldLog) || savedState.character.gambleDebt !== 9 || !savedState.character.scars.length || savedState.rogue.fragments !== 2 || !savedState.rogue.perks) throw new Error('저장 버전/경제/파편/전략 상태 저장 실패');
+if (savedState.saveVersion !== 5 || savedState.autoStrategy !== '파밍' || savedState.frontierPhaseIndex !== 2 || !Array.isArray(savedState.goldLog) || savedState.character.gambleDebt !== 9 || !savedState.character.scars.length || savedState.rogue.fragments !== 2 || !savedState.rogue.perks) throw new Error('저장 버전/경제/파편/전략 상태 저장 실패');
 delete storage['muhan.game.state'];
+const balanceProbe = vm.runInNewContext('(() => { const oldLevel = character.level; const oldHpMax = character.hpMax; const oldHp = character.hp; const oldAttack = character.attack; const oldDefense = character.defense; const oldSpirit = character.spirit; const oldEquipment = character.equipment; const oldRoom = roomName; const oldRogue = JSON.parse(JSON.stringify(rogue)); character.level = 5; character.hpMax = 78; character.hp = 78; character.attack = 18; character.defense = 11; character.spirit = 6; character.equipment = { 무기: "철검", 방어구: "철갑옷", 장신구: "사냥꾼 부적", 동료: "네코" }; roomName = "무한구역"; rogue.active = false; const regular = encountersForRoom(roomName).find((monster) => monster.trait !== "우두머리"); rogue = { ...rogue, active: true, depth: 1, maxDepth: 1, kills: 0, relics: [], curses: [], nodes: ["무한구역"] }; recordRogueCombat({ name: "테스트 몬스터" }); const result = [regular.level, regular.hp, regular.exp, regular.gold, rogue.depth, rogue.maxDepth, balanceConfig.rouletteSafePayoutRate]; character.level = oldLevel; character.hpMax = oldHpMax; character.hp = oldHp; character.attack = oldAttack; character.defense = oldDefense; character.spirit = oldSpirit; character.equipment = oldEquipment; roomName = oldRoom; rogue = oldRogue; return result; })()', context);
+if (balanceProbe[0] > 24 || balanceProbe[1] > 420 || balanceProbe[2] > 6000 || balanceProbe[3] > 2500) throw new Error('무한구역 일반몹 밸런스 상한 실패');
+if (balanceProbe[4] < 2 || balanceProbe[5] < 2) throw new Error('단일 무한구역 원정 깊이 증가 실패');
+if (balanceProbe[6] > 1.2) throw new Error('러시안룰렛 기대값 보정 실패');
 
 function screenText() {
   return elements.gameScreen.children.map((child) => child.textContent).join('\n');
@@ -288,7 +292,7 @@ async function submit(command) {
   await submit('조사');
   if (!screenText().includes('무한구역')) throw new Error('무한구역 조우 생성 실패');
   await submit('사냥 무리');
-  if (!screenText().includes('출현:') || !/Lv\.[2-9]\d/.test(screenText()) || !screenText().includes('위상:')) throw new Error('무한구역 복수 몬스터/10배 레벨 표시 실패');
+  if (!screenText().includes('출현:') || !/Lv\.\d+/.test(screenText()) || !screenText().includes('위상:') || !elements.statusPanel.textContent.includes('적 배율: x10')) throw new Error('무한구역 복수 몬스터/위상/배율 표시 실패');
   await submit('원정');
   if (!screenText().includes('[무한원정]') || !screenText().includes('[유물]')) throw new Error('무한원정 시작/유물 지급 실패');
   if (!elements.statusPanel.textContent.includes('[무한원정]') || !elements.statusPanel.textContent.includes('상태: 진행 중')) throw new Error('무한원정 상태창 표시 실패');
