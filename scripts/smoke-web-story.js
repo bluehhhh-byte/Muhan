@@ -106,7 +106,7 @@ const scarTest = vm.runInNewContext('(() => { const oldScars = character.scars.s
 if (scarTest[0] !== 1 || !scarTest[1].includes('흉터') || !scarTest[2]) throw new Error('패배 흉터/보정 실패');
 vm.runInNewContext('(() => { const oldGold = character.gold; const oldDebt = character.gambleDebt; const oldFragments = rogue.fragments; const oldGoldLog = goldLog.slice(); const oldStrategy = autoStrategy; const oldPhase = frontierPhaseIndex; const oldScars = character.scars.slice(); changeGold(12, "테스트 수입"); rogue.fragments = 2; character.gambleDebt = 9; autoStrategy = "파밍"; frontierPhaseIndex = 2; character.scars = [{ name: "테스트 흉터" }]; saveGameState(); character.gold = oldGold; character.gambleDebt = oldDebt; rogue.fragments = oldFragments; goldLog = oldGoldLog; autoStrategy = oldStrategy; frontierPhaseIndex = oldPhase; character.scars = oldScars; })()', context);
 const savedState = JSON.parse(storage['muhan.game.state']);
-if (savedState.saveVersion !== 3 || savedState.autoStrategy !== '파밍' || savedState.frontierPhaseIndex !== 2 || !Array.isArray(savedState.goldLog) || savedState.character.gambleDebt !== 9 || !savedState.character.scars.length || savedState.rogue.fragments !== 2 || !savedState.rogue.perks) throw new Error('저장 버전/경제/파편/전략 상태 저장 실패');
+if (savedState.saveVersion !== 4 || savedState.autoStrategy !== '파밍' || savedState.frontierPhaseIndex !== 2 || !Array.isArray(savedState.goldLog) || savedState.character.gambleDebt !== 9 || !savedState.character.scars.length || savedState.rogue.fragments !== 2 || !savedState.rogue.perks) throw new Error('저장 버전/경제/파편/전략 상태 저장 실패');
 delete storage['muhan.game.state'];
 
 function screenText() {
@@ -146,6 +146,9 @@ async function submit(command) {
   if (!screenText().includes('표식: X 압축 전장 / 적 전투력 x10')) throw new Error('무한구역 지도 표식 실패');
   if (!elements.statusPanel.textContent.includes('[실시간 지도]') || !elements.statusPanel.textContent.includes('[중앙광장]')) throw new Error('상태창 실시간 지도 표시 실패');
   if (!elements.statusPanel.textContent.includes('자동 목표: 스토리 우선')) throw new Error('자동 목표 기본값 표시 실패');
+  if (!elements.statusPanel.textContent.includes('[요약]') || !elements.statusPanel.textContent.includes('전략 균형')) throw new Error('상태 요약 표시 실패');
+  await submit('도움 자동');
+  if (!screenText().includes('[도움: 자동]') || !screenText().includes('전략 파밍')) throw new Error('주제별 도움말 실패');
   const seedBeforeGambling = seed;
   await submit('이동 주막');
   await submit('이동 도박장');
@@ -206,6 +209,8 @@ async function submit(command) {
   if (!screenText().includes('[레벨 상승]')) throw new Error('레벨 상승 메시지가 없음');
   await submit('회복');
   if (!screenText().includes('HP')) throw new Error('회복 명령 응답이 없음');
+  await submit('점수');
+  if (!screenText().includes('자동 전략') || !screenText().includes('흉터')) throw new Error('점수 요약 정리 실패');
   await submit('이동 생명의나무');
   await submit('대화 안내자');
   await submit('이동 중앙광장');

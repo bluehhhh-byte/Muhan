@@ -5,9 +5,9 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.8';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.9';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -57,6 +57,57 @@ const frontierPhases = [
   { name: '망각의 위상', mood: '슬픔', hpRate: 1.45, expRate: 1.6, goldRate: 0.75, damage: 10, warning: '강하지만 배움이 크다. 패배도 기록으로 남긴다.' },
   { name: '별빛의 위상', mood: '희망', hpRate: 0.95, expRate: 1.25, goldRate: 1.15, damage: 2, warning: '드문 기회다. 파편과 경험을 노리자.' }
 ];
+const statusSections = {
+  summary: '요약',
+  character: '캐릭터',
+  economy: '경제',
+  current: '현재상태',
+  frontier: '무한구역',
+  rogue: '무한원정',
+  quest: '현재 임무',
+  team: '팀 신뢰',
+  neko: '네코',
+  memory: '네코 지식',
+  equipment: '장비',
+  upgrade: '강화',
+  inventory: '보관 아이템',
+  map: '실시간 지도'
+};
+const helpTopics = {
+  자동: ['자동', '자동목표 무한구역', '자동목표 도박', '전략 안정', '전략 파밍', '전략 보스', '전략 파편', '계획'],
+  전투: ['사냥', '회복', '위상', '위상변경', '원정', '원정종료', '강화 무기'],
+  도박: ['도박', '도박 블랙잭 50', '도박 파칭코 올인', '도박 텍사스포커 올인', '도박 러시안룰렛 올인', '빚', '빚갚기'],
+  경제: ['경제 투자', '사회 투자', '정보구매 무한구역', '선물 이름', '급여 이름', '돈 장부는 상태창에서 확인'],
+  네코: ['네코 질문', '계획', '네코기억', '네코훈련 행운', '랜덤', '전략 안정'],
+  팀: ['유저', '팀 이름', '팀교체 기존 새', '팀해고 이름', '팀해산', '사회 결혼'],
+  무한구역: ['이동 무한구역', '조사', '사건', '위상', '위상변경', '사냥 무한구역 감시자']
+};
+const commandAliases = {
+  '무한평원 01-01': FRONTIER_ROOM,
+  '무한평원 05-05': FRONTIER_ROOM,
+  '무한평원 07-07': FRONTIER_ROOM,
+  '무한평원 10-10': FRONTIER_ROOM,
+  '무한평원': FRONTIER_ROOM,
+  '보스런': '전략 보스',
+  '파밍런': '전략 파밍',
+  '안전런': '전략 안정',
+  '빚청산': '전략 빚',
+  '도박우선': '자동목표 도박',
+  '무한구역자동': '자동목표 무한구역',
+  '상태확인': '상태',
+  '스코어': '점수',
+  '가방': '소지품'
+};
+const balanceConfig = {
+  frontierEnemyPower: FRONTIER_ENEMY_POWER,
+  initialAiUsers: 200,
+  maxAiUsers: 300,
+  maxScars: 8,
+  maxGoldLog: 5,
+  maxEconomyConcepts: 8,
+  autoRoomActionLimit: 2,
+  defaultGambleStake: 50
+};
 
 let names = [
   '검객루안', '달빛상인', '하늘도사', '백야검', '연화술사', '청풍객', '비류', '묵향', '서리궁수', '단목',
@@ -96,7 +147,7 @@ function generatedUserName(index) {
   return `${generatedUserWords[index % generatedUserWords.length]}${Math.floor(index / generatedUserWords.length) + 1}`;
 }
 
-function ensureAiUsers(target = 200) {
+function ensureAiUsers(target = balanceConfig.initialAiUsers) {
   let index = 0;
   while (names.length < target) {
     const name = generatedUserName(index);
@@ -108,7 +159,7 @@ function ensureAiUsers(target = 200) {
 function cleanAiUsers(list) {
   return list.filter((name, index, source) => (
     typeof name === 'string' && name.trim() && source.indexOf(name) === index
-  )).slice(0, 300);
+  )).slice(0, balanceConfig.maxAiUsers);
 }
 
 function addAiUser(prefix = '새싹') {
@@ -175,7 +226,7 @@ function frontierRoomName(row, col) {
 }
 
 function isLegacyFrontierRoom(name = '') {
-  return /^무한평원(?:\s+\d{2}-\d{2})?$/.test(String(name).trim());
+  return /^(무한평원|무한구역)(?:\s+\d{2}-\d{2})?$/.test(String(name).trim());
 }
 
 function canonicalRoomName(name = '') {
@@ -185,6 +236,16 @@ function canonicalRoomName(name = '') {
 
 function canonicalRoomList(list) {
   return Array.from(new Set(Array.from(list || []).map(canonicalRoomName).filter((name) => rooms[name])));
+}
+
+function normalizeCommandInput(raw = '') {
+  const trimmed = String(raw).trim();
+  if (!trimmed) return '';
+  const direct = commandAliases[trimmed];
+  if (direct) return direct === FRONTIER_ROOM ? `이동 ${direct}` : direct;
+  return Object.entries(commandAliases)
+    .sort((a, b) => b[0].length - a[0].length)
+    .reduce((text, [from, to]) => (text.includes(from) ? text.replaceAll(from, to) : text), trimmed);
 }
 
 function currentFrontierPhase() {
@@ -218,7 +279,7 @@ function addDefeatScar(monster, reason = '퇴각') {
   const name = `${phase} ${monster.trait || '전투'} 흉터`;
   character.scars = [{ name, monster: monster.name, reason, at: roomName }]
     .concat(character.scars.filter((scar) => scar.name !== name))
-    .slice(0, 8);
+    .slice(0, balanceConfig.maxScars);
   rememberNeko('전투', `흉터 ${name}`, 1);
   reflect('절망', '패배가 몸에 남으면 다음 선택은 조금 더 진짜가 된다.', `${reason}: ${monster.name}`);
   append(`[흉터] ${name}\n네코: 아픈 기록이지만 버리지 말자. 방어와 정신 보정으로 다음 판단을 버텨낼 거야.`, 'neko');
@@ -232,6 +293,19 @@ function phaseText() {
 function showFrontierPhase() {
   append(`\n[무한구역 위상]\n현재: ${phaseText()}\n효과: HP x${currentFrontierPhase().hpRate}, 경험 x${currentFrontierPhase().expRate}, 돈 x${currentFrontierPhase().goldRate}, 피해 +${currentFrontierPhase().damage}\n명령: 위상변경`, 'room');
   showChoices();
+}
+
+function statusSummaryLines() {
+  const stats = effectiveStats();
+  return [
+    `[${statusSections.summary}]`,
+    `${character.title} ${character.name} Lv.${character.level} / ${character.job}`,
+    `HP ${character.hp}/${character.hpMax} MP ${character.mp}/${character.mpMax} EXP ${character.exp}/${character.expToLevel}`,
+    `공격 ${stats.attack} 방어 ${stats.defense} 정신 ${stats.spirit} 돈 ${character.gold}전`,
+    `위치 ${roomName} / 목표 ${autoModes[currentAutoMode()]} / 전략 ${autoStrategies[autoStrategy] || autoStrategies.균형}`,
+    `위상 ${currentFrontierPhase().name} / 흉터 ${character.scars?.length || 0} / 팀 ${teamLabel()}`,
+    `빚 ${character.gambleDebt || 0}전 / AI 유저 ${names.length}명 / 버전 ${APP_VERSION}`
+  ];
 }
 
 function frontierCoord(name) {
@@ -1270,12 +1344,12 @@ function addDebt(name, amount) {
 
 function addEconomyConcept(concept) {
   if (!concept) return;
-  economy.concepts = [concept].concat(economy.concepts.filter((item) => item !== concept)).slice(0, 8);
+  economy.concepts = [concept].concat(economy.concepts.filter((item) => item !== concept)).slice(0, balanceConfig.maxEconomyConcepts);
 }
 
 function addContract(contract) {
   if (!contract) return;
-  economy.contracts = [contract].concat((economy.contracts || []).filter((item) => item !== contract)).slice(0, 8);
+  economy.contracts = [contract].concat((economy.contracts || []).filter((item) => item !== contract)).slice(0, balanceConfig.maxEconomyConcepts);
 }
 
 function shiftEconomy(delta, concept, text) {
@@ -1290,7 +1364,7 @@ function shiftReputation(delta) {
 
 function recordGold(delta, reason = '기록 없음') {
   if (!delta) return;
-  goldLog = [`${delta > 0 ? '+' : ''}${delta}전 ${reason}`].concat(goldLog).slice(0, 5);
+  goldLog = [`${delta > 0 ? '+' : ''}${delta}전 ${reason}`].concat(goldLog).slice(0, balanceConfig.maxGoldLog);
 }
 
 function changeGold(delta, reason = '돈 이동') {
@@ -1523,7 +1597,7 @@ function loadGameState() {
   }
   if (autoModeEl && autoModes[saved.autoMode]) autoModeEl.value = saved.autoMode;
   if (Array.isArray(saved.aiUsers)) names = cleanAiUsers(saved.aiUsers);
-  if (!names.length) ensureAiUsers(200);
+  if (!names.length) ensureAiUsers();
   if (saved.aiWealth && typeof saved.aiWealth === 'object') {
     aiWealth = Object.fromEntries(Object.entries(saved.aiWealth)
       .filter(([name]) => names.includes(name))
@@ -1539,13 +1613,13 @@ function loadGameState() {
       index: Math.max(40, Math.min(180, Number(saved.economy.index) || 100)),
       fund: Math.max(0, Number(saved.economy.fund) || 0),
       last: String(saved.economy.last || economy.last),
-      concepts: Array.isArray(saved.economy.concepts) ? saved.economy.concepts.filter(Boolean).slice(0, 8) : [],
+      concepts: Array.isArray(saved.economy.concepts) ? saved.economy.concepts.filter(Boolean).slice(0, balanceConfig.maxEconomyConcepts) : [],
       reputation: Math.max(-99, Math.min(99, Number(saved.economy.reputation) || 0)),
-      contracts: Array.isArray(saved.economy.contracts) ? saved.economy.contracts.filter(Boolean).slice(0, 8) : []
+      contracts: Array.isArray(saved.economy.contracts) ? saved.economy.contracts.filter(Boolean).slice(0, balanceConfig.maxEconomyConcepts) : []
     };
   }
   if (Array.isArray(saved.goldLog)) {
-    goldLog = saved.goldLog.filter(Boolean).slice(0, 5);
+    goldLog = saved.goldLog.filter(Boolean).slice(0, balanceConfig.maxGoldLog);
   }
   if (autoStrategies[saved.autoStrategy]) autoStrategy = saved.autoStrategy;
   frontierPhaseIndex = Math.max(0, Number(saved.frontierPhaseIndex) || 0) % frontierPhases.length;
@@ -1595,7 +1669,7 @@ function loadGameState() {
       if (saved.character[key] !== undefined) character[key] = saved.character[key];
     }
     if (Array.isArray(saved.character.scars)) {
-      character.scars = saved.character.scars.filter((scar) => scar && scar.name).slice(0, 8);
+      character.scars = saved.character.scars.filter((scar) => scar && scar.name).slice(0, balanceConfig.maxScars);
     }
     if (saved.character.equipment && typeof saved.character.equipment === 'object') character.equipment = saved.character.equipment;
     if (saved.character.upgrades && typeof saved.character.upgrades === 'object') {
@@ -1616,7 +1690,7 @@ function loadGameState() {
   character.expToLevel = Math.max(1, Number(character.expToLevel) || expForLevel(character.level));
   character.gold = Math.max(0, Number(character.gold) || 0);
   character.gambleDebt = Math.max(0, Number(character.gambleDebt) || 0);
-  character.scars = Array.isArray(character.scars) ? character.scars.slice(0, 8) : [];
+  character.scars = Array.isArray(character.scars) ? character.scars.slice(0, balanceConfig.maxScars) : [];
   character.storyStep = Math.max(0, Math.min(story.length - 1, Number(character.storyStep) || 0));
   ensureRoguePerks();
   for (const slot of ['무기', '방어구', '장신구']) {
@@ -1634,7 +1708,9 @@ function renderStatusPanel() {
     .slice(0, 3)
     .map(([name, debt]) => `${name} ${debt}전`);
   statusPanelEl.textContent = [
-    '[캐릭터]',
+    ...statusSummaryLines(),
+    '',
+    `[${statusSections.character}]`,
     `이름: ${character.name}`,
     `직업: ${character.job}`,
     `칭호: ${character.title}`,
@@ -1654,7 +1730,7 @@ function renderStatusPanel() {
     `AI 유저: ${names.length}명`,
     ...(roomZoneText() ? [`지역: ${roomZoneText()}`] : []),
     '',
-    '[경제]',
+    `[${statusSections.economy}]`,
     `시장지수: ${economy.index}`,
     `공동기금: ${economy.fund} 전`,
     `평판: ${economy.reputation}`,
@@ -1664,7 +1740,7 @@ function renderStatusPanel() {
     `새 개념: ${economy.concepts.join(', ') || '없음'}`,
     `돈 장부: ${goldLog.join(' / ') || '없음'}`,
     '',
-    '[현재상태]',
+    `[${statusSections.current}]`,
     `감정: ${character.mood}`,
     `장면: ${character.lastScene}`,
     `깨달음: ${character.insight}`,
@@ -1673,11 +1749,11 @@ function renderStatusPanel() {
     `자동 전략: ${autoStrategies[autoStrategy] || autoStrategies.균형}`,
     `흉터: ${scarSummary()}`,
     '',
-    '[무한구역]',
+    `[${statusSections.frontier}]`,
     `위상: ${phaseText()}`,
     `적 배율: x${FRONTIER_ENEMY_POWER}`,
     '',
-    '[무한원정]',
+    `[${statusSections.rogue}]`,
     `상태: ${rogue.active ? '진행 중' : '대기'}`,
     `현재 깊이: ${rogue.depth} / 이번 최고 ${rogue.maxDepth}`,
     `역대 최고: ${rogue.bestDepth}`,
@@ -1688,16 +1764,16 @@ function renderStatusPanel() {
     `유물: ${rogue.relics.length ? rogue.relics.join(', ') : '없음'}`,
     `저주: ${rogue.curses.length ? rogue.curses.join(', ') : '없음'}`,
     '',
-    '[현재 임무]',
+    `[${statusSections.quest}]`,
     currentQuest().title,
     currentQuest().goal,
     '',
     ...(team.length ? [
-      '[팀 신뢰]',
+      `[${statusSections.team}]`,
       ...team.map((name) => `${name}: ${trustFor(name)} / ${allyRole(name).label} / ${aiAbility(name)}`)
     ] : []),
     ...(team.length ? [''] : []),
-    '[네코]',
+    `[${statusSections.neko}]`,
     `레벨: ${neko.level}`,
     `행운: ${neko.luck}`,
     `능력: ${neko.ability}`,
@@ -1707,19 +1783,19 @@ function renderStatusPanel() {
     `성장 보정: x${neko.growthRate.toFixed(2)}`,
     `자동 진행: ${autoProgress ? '켜짐' : '꺼짐'}`,
     '',
-    '[네코 지식]',
+    `[${statusSections.memory}]`,
     nekoMemoryText(),
     '',
-    '[장비]',
+    `[${statusSections.equipment}]`,
     ...Object.entries(character.equipment).map(([slot, item]) => `${slot}: ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}`),
     '',
-    '[강화]',
+    `[${statusSections.upgrade}]`,
     ...['무기', '방어구', '장신구'].map((slot) => `${slot}: +${character.upgrades[slot] || 0}`),
     '',
-    '[보관 아이템]',
+    `[${statusSections.inventory}]`,
     ...character.inventory.map((item, index) => `${index + 1}. ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}`),
     '',
-    '[실시간 지도]',
+    `[${statusSections.map}]`,
     mapText()
   ].join('\n');
   updateDiagnostics();
@@ -2492,7 +2568,8 @@ function showInventory() {
 function showScore() {
   renderStatusPanel();
   const stats = effectiveStats();
-  append(`\n[점수]\n${character.title} ${character.name} / 레벨 ${character.level} ${character.job}\nHP ${character.hp}/${character.hpMax}  MP ${character.mp}/${character.mpMax}\n공격 ${stats.attack}  방어 ${stats.defense}  정신 ${stats.spirit}\n강화 무기 +${character.upgrades.무기} / 방어구 +${character.upgrades.방어구} / 장신구 +${character.upgrades.장신구}\nEXP ${character.exp}/${character.expToLevel}  돈 ${character.gold} 전\n현재 임무: ${currentQuest().title}`);
+  const scar = scarBonus();
+  append(`\n[점수]\n${character.title} ${character.name} / 레벨 ${character.level} ${character.job}\nHP ${character.hp}/${character.hpMax}  MP ${character.mp}/${character.mpMax}\n공격 ${stats.attack}  방어 ${stats.defense}  정신 ${stats.spirit}\n강화 무기 +${character.upgrades.무기} / 방어구 +${character.upgrades.방어구} / 장신구 +${character.upgrades.장신구}\nEXP ${character.exp}/${character.expToLevel}  돈 ${character.gold} 전\n흉터 ${scarSummary()} / 흉터 보정 방어 +${scar.defense}, 정신 +${scar.spirit}\n자동 전략 ${autoStrategies[autoStrategy] || autoStrategies.균형} / 위상 ${phaseText()}\n현재 임무: ${currentQuest().title}`);
 }
 
 function showNekoMemory() {
@@ -2783,7 +2860,7 @@ function buildSystemInstruction() {
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '축적 지식과 최근 기억을 근거로 다음 행동을 더 똑똑하게 추천한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 위상, 위상변경, 전략 안정, 전략 파밍, 전략 보스, 전략 파편, 계획, 파편상점, 파편구매 체력, 파편구매 저주저항, 빚, 빚갚기, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 이동 도박장, 도박 블랙잭 50, 도박 파칭코 50, 도박 텍사스포커 50, 도박 러시안룰렛 50, 도박 블랙잭 올인, 도박 파칭코 올인, 도박 텍사스포커 올인, 도박 러시안룰렛 올인, 자동목표 도박, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한구역, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 위상, 위상변경, 도움 자동, 도움 전투, 도움 도박, 전략 안정, 전략 파밍, 전략 보스, 전략 파편, 계획, 파편상점, 파편구매 체력, 파편구매 저주저항, 빚, 빚갚기, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 이동 도박장, 도박 블랙잭 50, 도박 파칭코 50, 도박 텍사스포커 50, 도박 러시안룰렛 50, 도박 블랙잭 올인, 도박 파칭코 올인, 도박 텍사스포커 올인, 도박 러시안룰렛 올인, 자동목표 도박, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한구역, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -2958,7 +3035,7 @@ function bestAutoFrontierChoice() {
 }
 
 function bestAutoGambleChoice() {
-  if (character.gold < 50) return encountersForRoom(roomName).length
+  if (character.gold < balanceConfig.defaultGambleStake) return encountersForRoom(roomName).length
     ? { label: '도박 자금 마련', command: '사냥' }
     : bestAutoMoveChoice();
   if (gambleState.blackjack) return blackjackValue(gambleState.blackjack.player) < 17
@@ -3204,7 +3281,7 @@ function setAutoButton() {
 async function autoTick() {
   if (!connected || !autoProgress || autoBusy) return;
   const mode = currentAutoMode();
-  const forcedMove = autoRoomActions >= 2 && mode !== 'gamble' && !(mode === 'frontier' && frontierCoord(roomName))
+  const forcedMove = autoRoomActions >= balanceConfig.autoRoomActionLimit && mode !== 'gamble' && !(mode === 'frontier' && frontierCoord(roomName))
     ? (mode === 'frontier' ? bestFrontierMoveChoice() : bestAutoMoveChoice())
     : null;
   const choice = forcedMove || (mode === 'gamble' ? bestAutoChoice() : freshAutoChoice(bestAutoChoice()));
@@ -3212,7 +3289,7 @@ async function autoTick() {
   autoBusy = true;
   const beforeRoom = roomName;
   const wasShopRoom = canShopHere();
-  append(`\n[자동 진행]\n${forcedMove ? '장소 행동 2회 완료. ' : ''}네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
+  append(`\n[자동 진행]\n${forcedMove ? `장소 행동 ${balanceConfig.autoRoomActionLimit}회 완료. ` : ''}네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
   try {
     await runCommand(choice.command);
     if (wasShopRoom && isShopCommand(choice.command)) autoShopCooldown = 3;
@@ -3520,8 +3597,15 @@ function dismissTeamMember(input = '') {
   append(`${name}을(를) 팀에서 해고했습니다.`);
 }
 
-function help() {
-  append(`\n[명령어]\n숫자              추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한구역 자동으로 단일 극한 구역 탐험\n전략 파밍         자동 진행의 우선 성향 변경\n계획              네코 3턴 계획 보기\n위상/위상변경     무한구역 현재 규칙 확인/전환\n자동목표 도박     자동으로 도박장 게임 진행\n원정              무한구역 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n파편상점          무한 파편 영구 보너스 상점\n파편구매 체력     파편으로 영구 성장 구매\n빚/빚갚기         도박 빚 확인과 상환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n도박              도박장 게임 목록\n도박 블랙잭 50    블랙잭 판돈 50전\n도박 블랙잭 올인  보유금 전부를 블랙잭에 걸기\n도박 파칭코 올인  보유금 전부를 파칭코에 걸기\n도박 텍사스포커 올인 보유금 전부를 포커에 걸기\n도박 러시안룰렛 올인 보유금 전부를 검은 룰렛에 걸기\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/무한구역 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/무한구역에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한구역 / 팀 / 도박\n자동전략: 균형 / 안정 / 파밍 / 보스 / 파편 / 빚\n예) 이동 주막 → 이동 도박장\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한구역`);
+function help(topic = '') {
+  const key = Object.keys(helpTopics).find((name) => topic.includes(name));
+  if (key) {
+    append(`\n[도움: ${key}]\n${helpTopics[key].map((item) => `- ${item}`).join('\n')}`, 'room');
+    showChoices();
+    return;
+  }
+  append(`\n[명령어]\n숫자              추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한구역 자동으로 단일 극한 구역 탐험\n도움 자동/전투/도박 주제별 도움말 보기\n전략 파밍         자동 진행의 우선 성향 변경\n계획              네코 3턴 계획 보기\n위상/위상변경     무한구역 현재 규칙 확인/전환\n자동목표 도박     자동으로 도박장 게임 진행\n원정              무한구역 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n파편상점          무한 파편 영구 보너스 상점\n파편구매 체력     파편으로 영구 성장 구매\n빚/빚갚기         도박 빚 확인과 상환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n도박              도박장 게임 목록\n도박 블랙잭 50    블랙잭 판돈 50전\n도박 블랙잭 올인  보유금 전부를 블랙잭에 걸기\n도박 파칭코 올인  보유금 전부를 파칭코에 걸기\n도박 텍사스포커 올인 보유금 전부를 포커에 걸기\n도박 러시안룰렛 올인 보유금 전부를 검은 룰렛에 걸기\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/무한구역 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/무한구역에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한구역 / 팀 / 도박\n자동전략: 균형 / 안정 / 파밍 / 보스 / 파편 / 빚\n도움 주제: 자동 / 전투 / 도박 / 경제 / 네코 / 팀 / 무한구역\n예) 이동 주막 → 이동 도박장\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한구역`);
+  showChoices();
 }
 
 function blueprint() {
@@ -3571,7 +3655,7 @@ function disconnect() {
 }
 
 async function runCommand(raw) {
-  const input = raw.trim();
+  const input = normalizeCommandInput(raw);
   if (!input) {
     await askNeko();
     return;
@@ -3587,7 +3671,7 @@ async function runCommand(raw) {
   const [command, ...rest] = input.split(/\s+/);
   const body = rest.join(' ');
 
-  if (['도움', 'help', '?', '명령'].includes(command)) help();
+  if (['도움', 'help', '?', '명령'].includes(command)) help(body);
   else if (command === '환영') welcome();
   else if (['임무', '퀘스트', 'quest'].includes(command)) showQuest();
   else if (['지도', '맵', 'map'].includes(command)) showMap();
@@ -3651,9 +3735,9 @@ async function runCommand(raw) {
   else if (['이동', '가', 'move'].includes(command)) move(body);
   else if (['팀교체', '파티교체', '교체'].includes(command)) replaceTeamMember(body);
   else if (['팀해고', '파티해고', '해고', '방출'].includes(command)) dismissTeamMember(body);
+  else if (['팀해산', '파티해산'].includes(command)) clearTeam();
   else if (['팀', '파티'].includes(command) && body) teamUp(body);
   else if (['팀', '파티'].includes(command)) append(`현재 팀: ${team.length ? team.join(', ') : '없음'}`);
-  else if (['팀해산', '파티해산'].includes(command)) clearTeam();
   else if (command === '네코') await askNeko(body);
   else if (command === '설정') document.querySelector('.settings').open = true;
   else if (command === '랜덤') makeRandomSettings();
@@ -3708,7 +3792,7 @@ window.addEventListener('beforeunload', () => {
   window.clearInterval(tickTimer);
 });
 
-ensureAiUsers(200);
+ensureAiUsers();
 loadSettings();
 syncAutoModeOptions();
 loadGameState();
