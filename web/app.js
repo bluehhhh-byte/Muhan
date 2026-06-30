@@ -5,9 +5,9 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.7';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.30.8';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -38,6 +38,25 @@ const fields = {
   ability: document.getElementById('nekoAbility'),
   prompt: document.getElementById('nekoPrompt')
 };
+
+const FRONTIER_ROOM = '무한구역';
+const FRONTIER_ENEMY_POWER = 10;
+const FRONTIER_SIZE = 1;
+const autoStrategies = {
+  균형: '균형',
+  안정: '안정 정비',
+  파밍: '아이템 파밍',
+  보스: '보스 도전',
+  파편: '파편 원정',
+  빚: '빚 청산'
+};
+const frontierPhases = [
+  { name: '피의 위상', mood: '분노', hpRate: 1.25, expRate: 1.25, goldRate: 0.9, damage: 8, warning: '반격이 거칠다. 회복약과 방어가 먼저다.' },
+  { name: '침묵의 위상', mood: '불안', hpRate: 1.1, expRate: 1.1, goldRate: 1, damage: 12, warning: '회복 타이밍이 늦어지기 쉽다. 위험하면 원정종료.' },
+  { name: '황금의 위상', mood: '호기심', hpRate: 1, expRate: 0.95, goldRate: 1.8, damage: 4, warning: '돈은 잘 돌지만 욕심이 전투를 늘린다.' },
+  { name: '망각의 위상', mood: '슬픔', hpRate: 1.45, expRate: 1.6, goldRate: 0.75, damage: 10, warning: '강하지만 배움이 크다. 패배도 기록으로 남긴다.' },
+  { name: '별빛의 위상', mood: '희망', hpRate: 0.95, expRate: 1.25, goldRate: 1.15, damage: 2, warning: '드문 기회다. 파편과 경험을 노리자.' }
+];
 
 let names = [
   '검객루안', '달빛상인', '하늘도사', '백야검', '연화술사', '청풍객', '비류', '묵향', '서리궁수', '단목',
@@ -125,67 +144,98 @@ const rooms = {
   '장터': { exits: ['주막'], desc: '상인들이 회복약과 낡은 장비를 펼쳐 놓았다.' },
   '초보사냥터': { exits: ['북문', '생명의나무'], desc: '작은 괴물의 발자국이 흙길 위에 남아 있다.' },
   '북문 밖 숲': { exits: ['북문', '폐광 입구'], desc: '안개 낀 숲길 사이로 오래된 발자국과 새 발자국이 겹쳐 있다.' },
-  '폐광 입구': { exits: ['북문 밖 숲', '무한평원 01-01'], desc: '무너진 광차와 검은 돌가루가 폐광의 입을 막고 있다.' }
+  '폐광 입구': { exits: ['북문 밖 숲', FRONTIER_ROOM], desc: '무너진 광차와 검은 돌가루가 폐광의 입을 막고 있다.' },
+  [FRONTIER_ROOM]: { exits: ['폐광 입구'], desc: '무한평원을 하나로 압축한 푸른 사각지대다. 모든 적은 이전보다 10배 강하게 반응한다.' }
 };
 
-const FRONTIER_SIZE = 10;
 const autoModes = {
   story: '스토리 우선',
   hunt: '사냥 우선',
   gear: '장비 우선',
   safe: '안전 우선',
   explore: '탐험 우선',
-  frontier: '무한평원',
+  frontier: '무한구역',
   team: '팀 우선',
   gamble: '도박 우선'
 };
 const frontierRegions = [
-  { row: 1, name: '초입초원', risk: '낮음', note: '폐광의 먼지가 풀밭 위로 옅게 내려앉았다.' },
-  { row: 2, name: '표지석 벌판', risk: '낮음', note: '낡은 표지석이 줄지어 서 있어 길을 익히기 좋다.' },
-  { row: 3, name: '이끼습지', risk: '보통', note: '젖은 흙과 푸른 이끼가 발걸음을 늦춘다.' },
-  { row: 4, name: '붉은협곡', risk: '보통', note: '붉은 절벽 사이로 매복 흔적이 이어진다.' },
-  { row: 5, name: '낡은역참', risk: '보통', note: '오래된 역참 길목이라 상인과 떠돌이가 모인다.' },
-  { row: 6, name: '안개벌판', risk: '높음', note: '시야가 짧아지고 멀리서 접속음만 들린다.' },
-  { row: 7, name: '검은고성터', risk: '높음', note: '허물어진 성벽 아래 고성 파수꾼의 표식이 남아 있다.' },
-  { row: 8, name: '유리폐허', risk: '높음', note: '깨진 유리 같은 돌들이 달빛을 반사한다.' },
-  { row: 9, name: '별무덤', risk: '매우 높음', note: '사라진 유저들의 이름표가 별처럼 박혀 있다.' },
-  { row: 10, name: '무한전선', risk: '매우 높음', note: '무한대전의 다음 장으로 이어지는 전선이다.' }
+  { row: 1, name: FRONTIER_ROOM, risk: '극한', note: '모든 좌표가 하나로 접혀 들고, 적의 힘은 10배로 솟구친다.' }
 ];
 const frontierSpecials = {
-  '무한평원 01-01': { type: 'safe', label: '평원 초소', marker: 'S' },
-  '무한평원 03-05': { type: 'heal', label: '생명의 샘', marker: 'H' },
-  '무한평원 05-05': { type: 'shop', label: '낡은 역참 상점', marker: '$' },
-  '무한평원 04-10': {
+  [FRONTIER_ROOM]: {
     type: 'boss',
-    label: '협곡 우두머리',
-    marker: 'B',
-    monster: { name: '협곡 우두머리', hp: 74, exp: 980, gold: 360, item: '붉은 협곡 표식', trait: '우두머리' }
-  },
-  '무한평원 07-07': {
-    type: 'boss',
-    label: '고성 파수장',
-    marker: 'B',
-    monster: { name: '고성 파수장', hp: 96, exp: 1320, gold: 520, item: '고성검', trait: '단단함' }
-  },
-  '무한평원 10-10': {
-    type: 'boss',
-    label: '무한전선 감시자',
-    marker: 'B',
-    monster: { name: '무한전선 감시자', hp: 128, exp: 1800, gold: 760, item: '무한전선 검', trait: '우두머리' }
+    label: '무한구역 감시자',
+    marker: 'X',
+    monster: { name: '무한구역 감시자', hp: 128, exp: 1800, gold: 760, item: '무한전선 검', trait: '우두머리' }
   }
 };
 
 function frontierRoomName(row, col) {
-  return `무한평원 ${String(row).padStart(2, '0')}-${String(col).padStart(2, '0')}`;
+  return FRONTIER_ROOM;
+}
+
+function isLegacyFrontierRoom(name = '') {
+  return /^무한평원(?:\s+\d{2}-\d{2})?$/.test(String(name).trim());
+}
+
+function canonicalRoomName(name = '') {
+  const trimmed = String(name).trim();
+  return trimmed === FRONTIER_ROOM || isLegacyFrontierRoom(trimmed) ? FRONTIER_ROOM : trimmed;
+}
+
+function canonicalRoomList(list) {
+  return Array.from(new Set(Array.from(list || []).map(canonicalRoomName).filter((name) => rooms[name])));
+}
+
+function currentFrontierPhase() {
+  return frontierPhases[((Number(frontierPhaseIndex) || 0) % frontierPhases.length + frontierPhases.length) % frontierPhases.length];
+}
+
+function shiftFrontierPhase(reason = '전장의 흐름') {
+  frontierPhaseIndex = (frontierPhaseIndex + 1) % frontierPhases.length;
+  const phase = currentFrontierPhase();
+  reflect(phase.mood, `${phase.name}: ${phase.warning}`, `${FRONTIER_ROOM} 위상 전환`);
+  append(`[위상] ${reason}: ${phase.name} - ${phase.warning}`, 'choice');
+  return phase;
+}
+
+function scarSummary() {
+  const scars = Array.isArray(character.scars) ? character.scars : [];
+  return scars.length ? scars.slice(0, 4).map((scar) => scar.name).join(' / ') : '없음';
+}
+
+function scarBonus() {
+  const count = Array.isArray(character.scars) ? character.scars.length : 0;
+  return {
+    defense: Math.min(5, Math.floor(count / 2)),
+    spirit: Math.min(8, count)
+  };
+}
+
+function addDefeatScar(monster, reason = '퇴각') {
+  character.scars = Array.isArray(character.scars) ? character.scars : [];
+  const phase = frontierCoord(roomName) ? currentFrontierPhase().name : '전투';
+  const name = `${phase} ${monster.trait || '전투'} 흉터`;
+  character.scars = [{ name, monster: monster.name, reason, at: roomName }]
+    .concat(character.scars.filter((scar) => scar.name !== name))
+    .slice(0, 8);
+  rememberNeko('전투', `흉터 ${name}`, 1);
+  reflect('절망', '패배가 몸에 남으면 다음 선택은 조금 더 진짜가 된다.', `${reason}: ${monster.name}`);
+  append(`[흉터] ${name}\n네코: 아픈 기록이지만 버리지 말자. 방어와 정신 보정으로 다음 판단을 버텨낼 거야.`, 'neko');
+}
+
+function phaseText() {
+  const phase = currentFrontierPhase();
+  return `${phase.name} / ${phase.warning}`;
+}
+
+function showFrontierPhase() {
+  append(`\n[무한구역 위상]\n현재: ${phaseText()}\n효과: HP x${currentFrontierPhase().hpRate}, 경험 x${currentFrontierPhase().expRate}, 돈 x${currentFrontierPhase().goldRate}, 피해 +${currentFrontierPhase().damage}\n명령: 위상변경`, 'room');
+  showChoices();
 }
 
 function frontierCoord(name) {
-  const match = /^무한평원 (\d{2})-(\d{2})$/.exec(name);
-  if (!match) return null;
-  const row = Number(match[1]);
-  const col = Number(match[2]);
-  if (row < 1 || row > FRONTIER_SIZE || col < 1 || col > FRONTIER_SIZE) return null;
-  return { row, col };
+  return canonicalRoomName(name) === FRONTIER_ROOM ? { row: 1, col: 1 } : null;
 }
 
 function frontierRegion(name) {
@@ -194,27 +244,16 @@ function frontierRegion(name) {
 }
 
 function frontierSpecial(name = roomName) {
-  return frontierSpecials[name] || null;
+  return frontierSpecials[canonicalRoomName(name)] || null;
 }
 
 function buildFrontierRooms() {
-  for (let row = 1; row <= FRONTIER_SIZE; row += 1) {
-    for (let col = 1; col <= FRONTIER_SIZE; col += 1) {
-      const exits = [];
-      if (row === 1 && col === 1) exits.push('폐광 입구');
-      if (row > 1) exits.push(frontierRoomName(row - 1, col));
-      if (col < FRONTIER_SIZE) exits.push(frontierRoomName(row, col + 1));
-      if (row < FRONTIER_SIZE) exits.push(frontierRoomName(row + 1, col));
-      if (col > 1) exits.push(frontierRoomName(row, col - 1));
-      const name = frontierRoomName(row, col);
-      const region = frontierRegion(name);
-      const special = frontierSpecials[name];
-      rooms[name] = {
-        exits,
-        desc: `${region.name} ${String(row).padStart(2, '0')}-${String(col).padStart(2, '0')} 구역이다. ${region.note} 위험도: ${region.risk}.${special ? ` 특수지점: ${special.label}.` : ''}`
-      };
-    }
-  }
+  const region = frontierRegions[0];
+  const special = frontierSpecials[FRONTIER_ROOM];
+  rooms[FRONTIER_ROOM] = {
+    exits: ['폐광 입구'],
+    desc: `${region.name} 단일 구역이다. ${region.note} 위험도: ${region.risk}. 적 전투력 x${FRONTIER_ENEMY_POWER}.${special ? ` 특수지점: ${special.label}.` : ''}`
+  };
 }
 
 buildFrontierRooms();
@@ -299,6 +338,7 @@ const character = {
   expToLevel: 512,
   gold: 500,
   gambleDebt: 0,
+  scars: [],
   storyStep: 0,
   mood: '담담함',
   insight: '아직 마음에 남은 문장은 없다.',
@@ -326,11 +366,11 @@ const story = [
   { title: '북문 조사', goal: '북문을 조사해 다음 장의 길을 열어라.', hint: '이동 북문 → 조사' },
   { title: '숲길 정찰', goal: '북문 밖 숲을 조사해 폐광 입구를 찾아라.', hint: '이동 북문 밖 숲 → 조사' },
   { title: '폐광 입구', goal: '폐광 입구의 우두머리를 쓰러뜨려 새 장비를 얻어라.', hint: '이동 폐광 입구 → 사냥' },
-  { title: '평원 진입', goal: '무한평원 01-01에 들어가 초입초원을 조사하라.', hint: '이동 무한평원 01-01 → 조사' },
-  { title: '표지석 조사', goal: '무한평원 02-02의 표지석 벌판에서 길의 규칙을 확인하라.', hint: '이동 무한평원 02-02 → 조사' },
-  { title: '역참 정비', goal: '무한평원 05-05의 낡은역참에서 보급로를 확인하라.', hint: '이동 무한평원 05-05 → 조사 / 품목' },
-  { title: '고성 파수장', goal: '무한평원 07-07의 고성 파수장을 쓰러뜨려 열쇠를 얻어라.', hint: '이동 무한평원 07-07 → 사냥 고성 파수장' },
-  { title: '무한전선', goal: '무한평원 10-10의 감시자를 쓰러뜨려 다음 장의 깃발을 얻어라.', hint: '이동 무한평원 10-10 → 사냥 무한전선 감시자' },
+  { title: '무한구역 진입', goal: '하나로 접힌 무한구역에 들어가 구조를 조사하라.', hint: '이동 무한구역 → 조사' },
+  { title: '압축 좌표 조사', goal: '무한구역의 압축된 표지와 위험 규칙을 확인하라.', hint: '조사' },
+  { title: '극한 정비', goal: '무한구역 안에서 보급과 전투 준비를 마쳐라.', hint: '조사 / 품목 / 강화 무기' },
+  { title: '무한구역 감시자', goal: '10배 강해진 무한구역 감시자에게 맞서라.', hint: '사냥 무한구역 감시자' },
+  { title: '극한 생환', goal: '무한구역에서 한 번 더 살아남아 새 깃발을 얻어라.', hint: '사냥' },
   { title: '열린 대전', goal: '사냥, 수련, 장비, 팀업, 탐험을 반복해 더 깊은 지역을 준비하라.', hint: '자동목표 / 사냥 / 강화 / 팀교체 / 네코' }
 ];
 
@@ -407,7 +447,7 @@ const frontierInsights = [
 function frontierEncounters(room = roomName) {
   const coord = frontierCoord(room);
   if (!coord) return [];
-  const special = frontierSpecials[room];
+  const special = frontierSpecial(room);
   const depth = coord.row + coord.col;
   const base = 22 + depth * 5;
   const firstName = `${pick(frontierPrefixes)} ${frontierMonsterNames[(coord.row + coord.col) % frontierMonsterNames.length]}`;
@@ -415,11 +455,11 @@ function frontierEncounters(room = roomName) {
   const traits = Object.keys(monsterTraits);
   const encounters = [
     {
-      name: `${firstName} ${coord.row}-${coord.col}`,
+      name: `${firstName} 무한구역`,
       hp: base,
       exp: 180 + depth * 42,
       gold: 60 + depth * 16,
-      item: depth % 7 === 0 ? '무한평원 표지석 조각' : '',
+      item: '무한구역 표지석 조각',
       trait: traits[depth % traits.length]
     },
     {
@@ -442,7 +482,8 @@ function frontierSceneText(room = roomName) {
   const scene = pickFresh(frontierScenes);
   const depth = coord.row + coord.col - 1;
   const special = frontierSpecial(room);
-  return `${region.name} ${coord.row}-${coord.col}, ${landmark}. ${scene}. 깊이감 ${depth}${special ? ` / ${special.label}` : ''}`;
+  const phase = currentFrontierPhase();
+  return `${region.name}, ${landmark}. ${scene}. 압축 깊이감 ${depth} / 적 전투력 x${FRONTIER_ENEMY_POWER} / 위상: ${phase.name}${special ? ` / ${special.label}` : ''}`;
 }
 
 function sceneTextForRoom(room = roomName) {
@@ -511,12 +552,16 @@ function monsterLevelFor(room, monster) {
   }[room] || 0;
   const frontierOffset = coord ? Math.floor((coord.row + coord.col - 2) / 4) : 0;
   const bossOffset = monster.trait === '우두머리' && coord ? 2 : 0;
-  return Math.max(1, character.level + roomOffset + frontierOffset + bossOffset);
+  const baseLevel = Math.max(1, character.level + roomOffset + frontierOffset + bossOffset);
+  return coord ? baseLevel * FRONTIER_ENEMY_POWER : baseLevel;
 }
 
 function scaleMonster(monster, room = roomName) {
+  const coord = frontierCoord(room);
+  const phase = coord ? currentFrontierPhase() : null;
   const level = monsterLevelFor(room, monster);
-  const levelRate = 1 + (level - 1) * 0.18;
+  const normalLevel = coord ? Math.max(1, Math.round(level / FRONTIER_ENEMY_POWER)) : level;
+  const levelRate = 1 + (normalLevel - 1) * 0.18;
   const overLevelRate = 1 + Math.max(0, level - character.level) * 0.08;
   const expFloor = Math.round(expForLevel(character.level) * (0.16 + Math.max(0, level - character.level) * 0.03));
   const goldFloor = 35 + level * 32;
@@ -526,9 +571,13 @@ function scaleMonster(monster, room = roomName) {
   return {
     ...monster,
     level,
-    hp: Math.round(monster.hp * levelRate * overLevelRate),
-    exp: Math.max(Math.round(monster.exp * levelRate), expFloor),
-    gold: Math.max(Math.round(monster.gold * (1 + level * 0.08)), goldFloor),
+    hp: Math.round(monster.hp * levelRate * overLevelRate * (coord ? FRONTIER_ENEMY_POWER : 1) * (phase?.hpRate || 1)),
+    exp: Math.max(Math.round(monster.exp * levelRate * (coord ? FRONTIER_ENEMY_POWER : 1) * (phase?.expRate || 1)), expFloor),
+    gold: Math.max(Math.round(monster.gold * (1 + level * 0.08) * (coord ? FRONTIER_ENEMY_POWER : 1) * (phase?.goldRate || 1)), goldFloor),
+    threat: coord ? `x${FRONTIER_ENEMY_POWER}` : '',
+    phase: phase?.name || '',
+    phaseWarning: phase?.warning || '',
+    phaseDamage: phase?.damage || 0,
     bonusItem
   };
 }
@@ -666,7 +715,7 @@ const localEvents = {
 };
 
 const regionEvents = [
-  { title: '초입초원 접속 흔적', text: '잔디 사이에 막 접속을 끊은 유저의 발자국이 남아 있다.', item: '초입초원 표식', trust: 1 },
+  { title: '무한구역 접속 흔적', text: '하나로 접힌 전장 안에 막 접속을 끊은 유저의 발자국이 겹쳐 있다.', item: '무한구역 표식', trust: 1 },
   { title: '표지석 암호', text: '낡은 표지석의 숫자 배열이 다음 길의 위험도를 알려준다.', item: '표지석 암호문' },
   { title: '이끼습지 구조 요청', text: '젖은 이끼 아래에서 끊어진 귓속말 기록을 건져 올렸다.', item: '젖은 귓속말 기록', heal: 12 },
   { title: '붉은협곡 매복 흔적', text: '네코가 붉은 절벽 아래 매복 자리를 먼저 찾아낸다.', item: '붉은 돌조각', damage: 3 },
@@ -691,6 +740,8 @@ let autoBusy = false;
 let autoRoomActions = 0;
 let autoRoomCommands = [];
 let autoShopCooldown = 0;
+let autoStrategy = '균형';
+let frontierPhaseIndex = 0;
 let visitedRooms = new Set([roomName]);
 let resolvedEvents = new Set();
 let customItems = {};
@@ -904,7 +955,7 @@ function startRogueRun() {
     return;
   }
   if (character.storyStep < 8 && !frontierCoord(roomName)) {
-    append('무한원정은 폐광 입구의 우두머리를 넘기고 무한평원 입장패를 얻은 뒤 시작할 수 있습니다.', 'choice');
+    append('무한원정은 폐광 입구의 우두머리를 넘기고 무한구역 입장패를 얻은 뒤 시작할 수 있습니다.', 'choice');
     showChoices();
     return;
   }
@@ -921,7 +972,7 @@ function startRogueRun() {
     nodes: []
   };
   if (!frontierCoord(roomName)) {
-    roomName = '무한평원 01-01';
+    roomName = FRONTIER_ROOM;
     visitedRooms.add(roomName);
     autoRoomActions = 0;
     autoRoomCommands = [];
@@ -1119,10 +1170,11 @@ function equipmentBonus() {
 function effectiveStats() {
   const bonus = equipmentBonus();
   const relic = rogueRelicStats();
+  const scar = scarBonus();
   return {
     attack: character.attack + bonus.attack + relic.attack,
-    defense: character.defense + bonus.defense + relic.defense,
-    spirit: character.spirit + bonus.spirit + relic.spirit
+    defense: character.defense + bonus.defense + relic.defense + scar.defense,
+    spirit: character.spirit + bonus.spirit + relic.spirit + scar.spirit
   };
 }
 
@@ -1267,7 +1319,7 @@ function roomZoneText(name = roomName) {
 }
 
 function canShopHere() {
-  return roomName === '장터' || frontierSpecial(roomName)?.type === 'shop';
+  return roomName === '장터' || roomName === FRONTIER_ROOM || frontierSpecial(roomName)?.type === 'shop';
 }
 
 function isShopCommand(command = '') {
@@ -1292,7 +1344,7 @@ function roomEvent(name = roomName) {
     title: special ? `${special.label} 단서` : region.title,
     text: special ? specialText[special.type] : region.text,
     exp: 50 + depth * 18,
-    gold: special?.type === 'shop' ? 0 : 20 + depth * 10,
+    gold: 20 + depth * 10,
     item: special ? `${special.label} 기록` : region.item,
     heal: (region.heal || 0) + (special?.type === 'heal' || special?.type === 'safe' ? 24 : 0),
     trust: region.trust || (special?.type === 'boss' ? 2 : 0),
@@ -1301,7 +1353,7 @@ function roomEvent(name = roomName) {
 }
 
 function eventDone(name = roomName) {
-  return resolvedEvents.has(name);
+  return resolvedEvents.has(canonicalRoomName(name));
 }
 
 function eventChoice() {
@@ -1333,7 +1385,9 @@ function syncAutoModeOptions() {
 function setAutoMode(input = '') {
   const value = input.trim();
   const normalized = modeKey(value);
-  const mode = Object.keys(autoModes).find((key) => key === value)
+  const aliasMode = /무한평원|무한구역|frontier/.test(normalized) ? 'frontier' : '';
+  const mode = aliasMode
+    || Object.keys(autoModes).find((key) => key === value)
     || Object.keys(autoModes).find((key) => modeKey(key) === normalized)
     || Object.keys(autoModes).find((key) => modeKey(autoModes[key]).includes(normalized));
   if (!mode) {
@@ -1348,17 +1402,8 @@ function setAutoMode(input = '') {
 }
 
 function frontierMapText() {
-  const current = frontierCoord(roomName);
-  return Array.from({ length: FRONTIER_SIZE }, (_, rowIndex) => (
-    Array.from({ length: FRONTIER_SIZE }, (_, colIndex) => {
-      const row = rowIndex + 1;
-      const col = colIndex + 1;
-      const code = `${String(row).padStart(2, '0')}-${String(col).padStart(2, '0')}`;
-      const marker = frontierSpecials[frontierRoomName(row, col)]?.marker || '.';
-      const cell = `${code}${marker}`;
-      return current && current.row === row && current.col === col ? `[${cell}]` : cell;
-    }).join(' ')
-  )).join('\n');
+  const cell = `${FRONTIER_ROOM}${frontierSpecial(FRONTIER_ROOM)?.marker || 'X'} x${FRONTIER_ENEMY_POWER}`;
+  return frontierCoord(roomName) ? `[${cell}]` : cell;
 }
 
 function mapText() {
@@ -1371,13 +1416,13 @@ function mapText() {
      /   \\    |
 ${here('초보사냥터')}  ${here('북문 밖 숲')}
               |
-          ${here('폐광 입구')} -- ${here('무한평원 01-01')}
+          ${here('폐광 입구')} -- ${here(FRONTIER_ROOM)}
 
-[무한평원 100구역]
-폐광 입구에서 01-01로 진입한다.
-표식: S 안전 / $ 상점 / H 회복 / B 보스
+[무한구역 1구역]
+폐광 입구에서 단일 무한구역으로 진입한다.
+표식: X 압축 전장 / 적 전투력 x${FRONTIER_ENEMY_POWER}
 ${frontierMapText()}
-권역: ${frontierRegions.map((region, index) => `${String(index + 1).padStart(2, '0')} ${region.name}(${region.risk})`).join(' / ')}`;
+권역: ${frontierRegions.map((region) => `${region.name}(${region.risk})`).join(' / ')}`;
 }
 
 function nekoProfile() {
@@ -1401,7 +1446,7 @@ function saveGameState() {
   try {
     localStorage.setItem(GAME_STATE_KEY, JSON.stringify({
       saveVersion: SAVE_VERSION,
-      roomName,
+      roomName: canonicalRoomName(roomName),
       team,
       teamTrust,
       aiUsers: names,
@@ -1409,10 +1454,12 @@ function saveGameState() {
       aiDebt,
       economy,
       goldLog,
+      autoStrategy,
+      frontierPhaseIndex,
       nekoTraining,
       aiBirthSeq,
-      visitedRooms: Array.from(visitedRooms).filter((name) => rooms[name]),
-      resolvedEvents: Array.from(resolvedEvents).filter((name) => rooms[name]),
+      visitedRooms: canonicalRoomList(visitedRooms),
+      resolvedEvents: canonicalRoomList(resolvedEvents),
       autoMode: currentAutoMode(),
       customItems,
       rogue: {
@@ -1427,7 +1474,7 @@ function saveGameState() {
         perks: rogue.perks,
         relics: rogue.relics,
         curses: rogue.curses,
-        nodes: rogue.nodes.filter((name) => rooms[name])
+        nodes: canonicalRoomList(rogue.nodes)
       },
       character: {
         title: character.title,
@@ -1443,6 +1490,7 @@ function saveGameState() {
         expToLevel: character.expToLevel,
         gold: character.gold,
         gambleDebt: character.gambleDebt,
+        scars: character.scars,
         storyStep: character.storyStep,
         mood: character.mood,
         insight: character.insight,
@@ -1464,13 +1512,14 @@ function loadGameState() {
   } catch (error) {
     return;
   }
-  if (rooms[saved.roomName]) roomName = saved.roomName;
+  const savedRoom = canonicalRoomName(saved.roomName);
+  if (rooms[savedRoom]) roomName = savedRoom;
   if (Array.isArray(saved.visitedRooms)) {
-    visitedRooms = new Set(saved.visitedRooms.filter((name) => rooms[name]));
+    visitedRooms = new Set(canonicalRoomList(saved.visitedRooms));
   }
   visitedRooms.add(roomName);
   if (Array.isArray(saved.resolvedEvents)) {
-    resolvedEvents = new Set(saved.resolvedEvents.filter((name) => rooms[name]));
+    resolvedEvents = new Set(canonicalRoomList(saved.resolvedEvents));
   }
   if (autoModeEl && autoModes[saved.autoMode]) autoModeEl.value = saved.autoMode;
   if (Array.isArray(saved.aiUsers)) names = cleanAiUsers(saved.aiUsers);
@@ -1498,6 +1547,8 @@ function loadGameState() {
   if (Array.isArray(saved.goldLog)) {
     goldLog = saved.goldLog.filter(Boolean).slice(0, 5);
   }
+  if (autoStrategies[saved.autoStrategy]) autoStrategy = saved.autoStrategy;
+  frontierPhaseIndex = Math.max(0, Number(saved.frontierPhaseIndex) || 0) % frontierPhases.length;
   if (saved.nekoTraining && typeof saved.nekoTraining === 'object') {
     nekoTraining = {
       combat: Math.max(0, Number(saved.nekoTraining.combat) || 0),
@@ -1537,11 +1588,14 @@ function loadGameState() {
     rogue.curses = Array.isArray(saved.rogue.curses)
       ? saved.rogue.curses.filter((name) => rogueCurseCatalog.some((item) => item.name === name))
       : [];
-    rogue.nodes = Array.isArray(saved.rogue.nodes) ? saved.rogue.nodes.filter((name) => rooms[name]) : [];
+    rogue.nodes = Array.isArray(saved.rogue.nodes) ? canonicalRoomList(saved.rogue.nodes) : [];
   }
   if (saved.character && typeof saved.character === 'object') {
     for (const key of ['title', 'level', 'hp', 'hpMax', 'mp', 'mpMax', 'attack', 'defense', 'spirit', 'exp', 'expToLevel', 'gold', 'gambleDebt', 'storyStep', 'mood', 'insight', 'lastScene']) {
       if (saved.character[key] !== undefined) character[key] = saved.character[key];
+    }
+    if (Array.isArray(saved.character.scars)) {
+      character.scars = saved.character.scars.filter((scar) => scar && scar.name).slice(0, 8);
     }
     if (saved.character.equipment && typeof saved.character.equipment === 'object') character.equipment = saved.character.equipment;
     if (saved.character.upgrades && typeof saved.character.upgrades === 'object') {
@@ -1562,6 +1616,7 @@ function loadGameState() {
   character.expToLevel = Math.max(1, Number(character.expToLevel) || expForLevel(character.level));
   character.gold = Math.max(0, Number(character.gold) || 0);
   character.gambleDebt = Math.max(0, Number(character.gambleDebt) || 0);
+  character.scars = Array.isArray(character.scars) ? character.scars.slice(0, 8) : [];
   character.storyStep = Math.max(0, Math.min(story.length - 1, Number(character.storyStep) || 0));
   ensureRoguePerks();
   for (const slot of ['무기', '방어구', '장신구']) {
@@ -1615,6 +1670,12 @@ function renderStatusPanel() {
     `깨달음: ${character.insight}`,
     `팀: ${teamLabel()}`,
     `자동 목표: ${autoModes[currentAutoMode()]}`,
+    `자동 전략: ${autoStrategies[autoStrategy] || autoStrategies.균형}`,
+    `흉터: ${scarSummary()}`,
+    '',
+    '[무한구역]',
+    `위상: ${phaseText()}`,
+    `적 배율: x${FRONTIER_ENEMY_POWER}`,
     '',
     '[무한원정]',
     `상태: ${rogue.active ? '진행 중' : '대기'}`,
@@ -1787,7 +1848,7 @@ function recoverHp() {
 
 function showShop() {
   if (!canShopHere()) {
-    append('상점 품목은 장터나 무한평원 역참에서 확인할 수 있습니다.');
+    append('상점 품목은 장터나 무한구역 보급지점에서 확인할 수 있습니다.');
     showChoices();
     return;
   }
@@ -1797,7 +1858,7 @@ function showShop() {
 
 function buyItem(input = '') {
   if (!canShopHere()) {
-    append('구매는 장터나 무한평원 역참에서 할 수 있습니다.');
+    append('구매는 장터나 무한구역 보급지점에서 할 수 있습니다.');
     showChoices();
     return;
   }
@@ -1862,14 +1923,9 @@ function giftTeam(input = '') {
 function buyInformation(input = '') {
   const cost = 50 + character.level * 8;
   if (!spendGold(cost, '정보 구매')) return;
-  const directRoom = Object.keys(rooms).find((name) => input.includes(name));
-  const frontierNext = frontierCoord(roomName)
-    ? rooms[roomName].exits.find((exit) => {
-      const here = frontierCoord(roomName);
-      const next = frontierCoord(exit);
-      return next && next.row + next.col > here.row + here.col;
-    })
-    : '무한평원 01-01';
+  const normalizedInput = input.replace(/무한평원(?:\s+\d{2}-\d{2})?/g, FRONTIER_ROOM);
+  const directRoom = Object.keys(rooms).find((name) => normalizedInput.includes(name));
+  const frontierNext = FRONTIER_ROOM;
   const targetRoom = directRoom || frontierNext || roomName;
   const event = roomEvent(targetRoom);
   const monsters = encountersForRoom(targetRoom).slice(0, 2).map((monster) => `${monster.name} Lv.${monster.level}`).join(', ') || '낮음';
@@ -2312,7 +2368,7 @@ function showQuest() {
 }
 
 function welcome() {
-  append('\n[환영]\n무한대전은 광장에서 시작해 봐/조사로 주변을 읽고, 대화로 임무를 받고, 공격과 수련으로 경험을 얻는 PC통신식 MUD입니다.\n경험치가 충분하면 자동으로 레벨이 오르고, HP가 낮으면 회복/사용 회복약/구매 회복약으로 버틸 수 있습니다.\n무한평원에 들어간 뒤에는 "원정"으로 유물과 저주가 쌓이는 로그라이크 원정을 시작할 수 있습니다.', 'room');
+  append('\n[환영]\n무한대전은 광장에서 시작해 봐/조사로 주변을 읽고, 대화로 임무를 받고, 공격과 수련으로 경험을 얻는 PC통신식 MUD입니다.\n경험치가 충분하면 자동으로 레벨이 오르고, HP가 낮으면 회복/사용 회복약/구매 회복약으로 버틸 수 있습니다.\n무한구역에 들어간 뒤에는 "원정"으로 유물과 저주가 쌓이는 로그라이크 원정을 시작할 수 있습니다. 이 구역의 적은 10배 강합니다.', 'room');
   if (character.storyStep === 0) setStoryStep(1, '현감청으로 가서 현감과 대화하자.');
   commitProgress();
   showChoices();
@@ -2377,17 +2433,17 @@ function inspectRoom() {
     setStoryStep(7, '숲길 끝에서 폐광 입구를 찾았다. 폐광 입구로 가서 우두머리를 상대하자.');
     commitProgress();
   }
-  if (roomName === '무한평원 01-01' && character.storyStep === 8) {
-    setStoryStep(9, '초입초원 지도를 읽었다. 02-02 표지석 벌판에서 길의 규칙을 확인하자.');
+  if (roomName === FRONTIER_ROOM && character.storyStep === 8) {
+    setStoryStep(9, '무한구역의 압축 지도를 읽었다. 같은 구역 안에서 표지석의 규칙을 더 조사하자.');
     commitProgress();
   }
-  if (roomName === '무한평원 02-02' && character.storyStep === 9) {
+  else if (roomName === FRONTIER_ROOM && character.storyStep === 9) {
     if (!hasItem('표지석 탁본')) addItem('표지석 탁본');
-    setStoryStep(10, '표지석 탁본을 얻었다. 05-05 낡은역참에서 보급로를 확인하자.');
+    setStoryStep(10, '표지석 탁본을 얻었다. 무한구역 안에서 보급로와 장비 상태를 확인하자.');
     commitProgress();
   }
-  if (roomName === '무한평원 05-05' && character.storyStep === 10) {
-    setStoryStep(11, '역참 상인이 고성 파수장의 위치를 알려줬다. 07-07로 향하자.');
+  else if (roomName === FRONTIER_ROOM && character.storyStep === 10) {
+    setStoryStep(11, '무한구역의 보급로를 확인했다. 이제 10배 강해진 감시자와 맞서자.');
     commitProgress();
   }
   showChoices();
@@ -2569,7 +2625,7 @@ function upgradeEquipment(input = '') {
 function hunt(input = '') {
   const encounters = encountersForRoom(roomName);
   if (!encounters.length) {
-    append('이곳은 사냥터가 아닙니다. 초보사냥터, 북문 근처, 무한평원에서 시도하세요.');
+    append('이곳은 사냥터가 아닙니다. 초보사냥터, 북문 근처, 무한구역에서 시도하세요.');
     return;
   }
 
@@ -2582,7 +2638,8 @@ function hunt(input = '') {
   const attackPower = stats.attack + allies.attack + neko.combat + gearEffects.attackBonus;
   const guardPower = stats.defense + allies.defense + neko.guard;
   const traitDamage = Math.max(0, (trait.damage || 0) - allies.scout);
-  const dice = combatDiceResult(monster, attackPower, guardPower, traitDamage + rogueDamageBonus(), gearEffects);
+  const phaseLine = monster.phase ? `\n위상: ${monster.phase} / ${monster.phaseWarning}` : '';
+  const dice = combatDiceResult(monster, attackPower, guardPower, traitDamage + rogueDamageBonus() + (monster.phaseDamage || 0), gearEffects);
   const damage = dice.damage;
   const expGain = Math.round(monster.exp * (trait.expRate || 1) * neko.growthRate * gearEffects.expRate);
   const goldGain = Math.round(monster.gold * (trait.goldRate || 1) * neko.goldRate * rogueGoldRate() * gearEffects.goldRate);
@@ -2590,6 +2647,7 @@ function hunt(input = '') {
   const beforeHp = character.hp;
   character.hp = Math.max(1, character.hp - damage);
   if (rogue.active && beforeHp <= damage) {
+    addDefeatScar(monster, '원정 퇴각');
     append(`\n[전투]\n${monster.name}에게 맞섰지만 원정의 압박이 더 컸습니다.\n피해 ${damage}. HP가 1까지 떨어져 네코가 퇴각 신호를 냅니다.`, 'choice');
     finishRogueRun(false, `${monster.name} 전투`);
     return;
@@ -2597,7 +2655,9 @@ function hunt(input = '') {
   if (!dice.defeated) {
     const twistText = frontierTwist(monster, false);
     if (!twistText && frontierCoord(roomName)) reflect('불안', '이기지 못한 전투도 다음 판단의 뼈대가 된다.', character.lastScene);
-    append(`\n[전투]\n${monster.name} Lv.${monster.level}와 맞섰지만 끝내 쓰러뜨리지 못했습니다.${groupText}\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 퇴각 각도를 잡아줬다. 보조 +${neko.combat}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터 HP ${dice.monsterHp}/${monster.hp}. 총 피해 ${damage}를 받고 물러났습니다. 보상은 없습니다.${twistText}`, 'choice');
+    addDefeatScar(monster, '전투 퇴각');
+    if (frontierCoord(roomName) && Math.random() > 0.55) shiftFrontierPhase('패배의 파문');
+    append(`\n[전투]\n${monster.name} Lv.${monster.level}와 맞섰지만 끝내 쓰러뜨리지 못했습니다.${groupText}\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}${phaseLine}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 퇴각 각도를 잡아줬다. 보조 +${neko.combat}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터 HP ${dice.monsterHp}/${monster.hp}. 총 피해 ${damage}를 받고 물러났습니다. 보상은 없습니다.${twistText}`, 'choice');
     autoRecoverIfCritical();
     rememberNeko('전투', `${roomName} ${monster.name} 퇴각`, 1);
     commitProgress();
@@ -2608,7 +2668,8 @@ function hunt(input = '') {
   changeGold(goldGain, `${monster.name} 전리품`);
   const twistText = frontierTwist(monster, true);
   if (!twistText && frontierCoord(roomName)) reflect('희망', '살아남은 전투는 몸보다 먼저 마음을 단련한다.', character.lastScene);
-  append(`\n[전투]\n${monster.name} Lv.${monster.level}을(를) 공격했다.${groupText}\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터를 쓰러뜨리고 총 피해 ${damage}를 받았다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전${twistText}`, 'choice');
+  append(`\n[전투]\n${monster.name} Lv.${monster.level}을(를) 공격했다.${groupText}\n규칙: 2d36 대항 판정. 총합 차이로 실패/방어/명중/강타/치명을 나눕니다.\n특성: ${monster.trait || '없음'}${trait.text ? ` - ${trait.text}` : ''}${phaseLine}\n공격력 ${attackPower}, 방어력 ${guardPower}. 네코가 앞발로 빈틈을 만들었다. 보조 +${neko.combat}, 성장 x${neko.growthRate.toFixed(2)}.${allies.scout ? ` 정찰 보정 -${allies.scout}.` : ''}\n[전투 과정]\n${dice.text}\n몬스터를 쓰러뜨리고 총 피해 ${damage}를 받았다.\n획득: 경험 ${expGain}, 돈 ${goldGain} 전${twistText}`, 'choice');
+  if (frontierCoord(roomName) && Math.random() > 0.62) shiftFrontierPhase('승리의 여진');
   if (team.length) {
     raiseTeamTrust(1);
     append(`[팀 신뢰] ${team.map((name) => `${name} ${trustFor(name)}`).join(' / ')}`, 'ally');
@@ -2631,13 +2692,13 @@ function hunt(input = '') {
     if (character.level >= 2) setStoryStep(4, '레벨이 올랐다. 생명의나무로 가서 안내자와 대화하자.');
   }
   if (roomName === '폐광 입구' && character.storyStep === 7) {
-    setStoryStep(8, '폐광 입구의 우두머리를 넘겼다. 무한평원 01-01로 들어가 새 지도를 확인하자.');
+    setStoryStep(8, '폐광 입구의 우두머리를 넘겼다. 무한구역으로 들어가 새 지도를 확인하자.');
   }
-  if (roomName === '무한평원 07-07' && character.storyStep === 11 && monster.name.includes('고성 파수장')) {
-    setStoryStep(12, '검은 고성 열쇠를 얻었다. 마지막 표식은 무한평원 10-10에 있다.');
+  if (roomName === FRONTIER_ROOM && character.storyStep === 11 && monster.name.includes('무한구역 감시자')) {
+    setStoryStep(12, '무한구역 감시자를 넘어섰다. 같은 구역에서 한 번 더 살아남아 극한 깃발을 얻자.');
   }
-  if (roomName === '무한평원 10-10' && character.storyStep === 12 && monster.name.includes('무한전선 감시자')) {
-    setStoryStep(13, '무한전선 깃발을 얻었다. 이제 무한평원 전체가 열린 사냥터가 되었다.');
+  if (roomName === FRONTIER_ROOM && character.storyStep === 12) {
+    setStoryStep(13, '극한 깃발을 얻었다. 이제 무한구역 하나가 무한대전의 열린 사냥터가 되었다.');
   }
   commitProgress();
   showChoices();
@@ -2666,13 +2727,16 @@ function fallbackNeko(question = '') {
   if (/감정|기분|깨달음|생각|위로/.test(q)) return `지금 너는 ${character.mood} 쪽에 가까워 보여. 내가 기억한 문장은 "${character.insight}"야. 다음 행동은 이 감각을 버리지 않는 쪽으로 고르자.`;
   if (/파편|상점|영구|저주저항/.test(q)) return `무한 파편은 "파편상점"에서 써. 체력, 공격, 방어, 정신, 네코기억, 저주저항, 유물권을 살 수 있어. 보유 파편은 ${rogue.fragments}개야.`;
   if (/빚|외상|파산/.test(q)) return `도박 빚은 ${character.gambleDebt || 0}전이야. 돈이 있으면 "빚갚기"로 갚고, 없으면 사냥이나 사건으로 다시 발판을 만들자.`;
+  if (/위상|무한구역|10배/.test(q)) return `지금 무한구역은 ${phaseText()} 상태야. "위상"으로 확인하고 "위상변경"으로 흐름을 바꿀 수 있어.`;
+  if (/계획|전술|3턴/.test(q)) return '"계획"을 입력하면 내가 3턴짜리 행동 계획을 짜줄게.';
+  if (/전략|자동전략/.test(q)) return `현재 자동 전략은 ${autoStrategies[autoStrategy]}이야. "전략 안정", "전략 파밍", "전략 보스", "전략 파편", "전략 빚"을 쓸 수 있어.`;
   if (/원정|로그|유물|저주|깊이|파편/.test(q)) return rogue.active
     ? `무한원정 진행 중이야. 깊이 ${rogue.depth}, 유물 ${rogue.relics.length}개, 저주 ${rogue.curses.length}개야. 위험하면 "원정종료"로 빠져.`
-    : '무한평원에서 "원정"을 입력하면 로그라이크식 무한원정을 시작해. 유물은 강해지고, 깊이 5마다 저주가 붙어.';
+    : '무한구역에서 "원정"을 입력하면 로그라이크식 무한원정을 시작해. 유물은 강해지고, 적은 10배 강하게 몰아쳐.';
   if (/지도|맵|map/.test(q)) return `지도는 "지도"라고 입력하면 볼 수 있어. 현재 위치는 ${roomName}이야.`;
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 해고는 "팀해고 이름", 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
-  if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한평원, 자동목표 팀, 자동목표 도박을 쓸 수 있어.';
+  if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한구역, 자동목표 팀, 자동목표 도박을 쓸 수 있어.';
   if (/돈|경제|투자|급여|선물|정보|치료소|도박|블랙잭|파칭코|포커/.test(q)) return `시장지수는 ${economy.index}, 새 개념은 ${economy.concepts.join(', ') || '아직 없음'}이야. 돈은 "네코훈련 행운", "선물 이름", "정보구매", "치료소", "연성 투자", "경제 투자", "도박 블랙잭 50", "도박 파칭코 올인", "빚갚기"로 움직여.`;
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/연성|조합|융합|합성|도박/.test(q)) return `보관함 아이템이 2개 이상이면 "연성"으로 새 장비를 만들 수 있어. 내 행운은 ${nekoProfile().luck}이라 결과가 조금 흔들려.`;
@@ -2703,6 +2767,9 @@ function buildSystemInstruction() {
     `현재 장면: ${character.lastScene}`,
     `현재 감정: ${character.mood}`,
     `현재 깨달음: ${character.insight}`,
+    `무한구역 위상: ${phaseText()}`,
+    `자동 전략: ${autoStrategies[autoStrategy] || autoStrategies.균형}`,
+    `패배 흉터: ${scarSummary()}`,
     `출구: ${rooms[roomName].exits.join(', ')}`,
     `주변 유저: ${roomUsers().map(aiUserLabel).join(', ')}`,
     `현재 팀: ${team.length ? team.join(', ') : '없음'}`,
@@ -2716,12 +2783,13 @@ function buildSystemInstruction() {
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '축적 지식과 최근 기억을 근거로 다음 행동을 더 똑똑하게 추천한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 파편상점, 파편구매 체력, 파편구매 저주저항, 빚, 빚갚기, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 이동 도박장, 도박 블랙잭 50, 도박 파칭코 50, 도박 텍사스포커 50, 도박 러시안룰렛 50, 도박 블랙잭 올인, 도박 파칭코 올인, 도박 텍사스포커 올인, 도박 러시안룰렛 올인, 자동목표 도박, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한평원, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 위상, 위상변경, 전략 안정, 전략 파밍, 전략 보스, 전략 파편, 계획, 파편상점, 파편구매 체력, 파편구매 저주저항, 빚, 빚갚기, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 이동 도박장, 도박 블랙잭 50, 도박 파칭코 50, 도박 텍사스포커 50, 도박 러시안룰렛 50, 도박 블랙잭 올인, 도박 파칭코 올인, 도박 텍사스포커 올인, 도박 러시안룰렛 올인, 자동목표 도박, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한구역, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
 function moveCommandToward(destination) {
-  if (rooms[roomName].exits.includes(destination)) return `이동 ${destination}`;
+  const target = canonicalRoomName(destination);
+  if (rooms[roomName].exits.includes(target)) return `이동 ${target}`;
   const queue = [{ room: roomName, path: [] }];
   const visited = new Set([roomName]);
   while (queue.length) {
@@ -2729,12 +2797,12 @@ function moveCommandToward(destination) {
     for (const exit of rooms[current.room].exits) {
       if (visited.has(exit)) continue;
       const path = current.path.concat(exit);
-      if (exit === destination) return `이동 ${path[0]}`;
+      if (exit === target) return `이동 ${path[0]}`;
       visited.add(exit);
       queue.push({ room: exit, path });
     }
   }
-  return `이동 ${destination}`;
+  return `이동 ${target}`;
 }
 
 function storyChoice() {
@@ -2760,21 +2828,21 @@ function storyChoice() {
   if (character.storyStep === 7) return roomName === '폐광 입구'
     ? { label: '폐광 우두머리 사냥', command: '사냥 폐광 우두머리' }
     : { label: '폐광 입구로 이동', command: moveCommandToward('폐광 입구') };
-  if (character.storyStep === 8) return roomName === '무한평원 01-01'
-    ? { label: '초입초원 조사', command: '조사' }
-    : { label: '무한평원 진입', command: moveCommandToward('무한평원 01-01') };
-  if (character.storyStep === 9) return roomName === '무한평원 02-02'
-    ? { label: '표지석 조사', command: '조사' }
-    : { label: '표지석 벌판 이동', command: moveCommandToward('무한평원 02-02') };
-  if (character.storyStep === 10) return roomName === '무한평원 05-05'
-    ? { label: '역참 조사', command: '조사' }
-    : { label: '낡은역참 이동', command: moveCommandToward('무한평원 05-05') };
-  if (character.storyStep === 11) return roomName === '무한평원 07-07'
-    ? { label: '고성 파수장 사냥', command: '사냥 고성 파수장' }
-    : { label: '검은고성터 이동', command: moveCommandToward('무한평원 07-07') };
-  if (character.storyStep === 12) return roomName === '무한평원 10-10'
-    ? { label: '무한전선 감시자 사냥', command: '사냥 무한전선 감시자' }
-    : { label: '무한전선 이동', command: moveCommandToward('무한평원 10-10') };
+  if (character.storyStep === 8) return roomName === FRONTIER_ROOM
+    ? { label: '무한구역 조사', command: '조사' }
+    : { label: '무한구역 진입', command: moveCommandToward(FRONTIER_ROOM) };
+  if (character.storyStep === 9) return roomName === FRONTIER_ROOM
+    ? { label: '압축 표지석 조사', command: '조사' }
+    : { label: '무한구역 진입', command: moveCommandToward(FRONTIER_ROOM) };
+  if (character.storyStep === 10) return roomName === FRONTIER_ROOM
+    ? { label: '극한 정비 조사', command: '조사' }
+    : { label: '무한구역 진입', command: moveCommandToward(FRONTIER_ROOM) };
+  if (character.storyStep === 11) return roomName === FRONTIER_ROOM
+    ? { label: '무한구역 감시자 사냥', command: '사냥 무한구역 감시자' }
+    : { label: '무한구역 진입', command: moveCommandToward(FRONTIER_ROOM) };
+  if (character.storyStep === 12) return roomName === FRONTIER_ROOM
+    ? { label: '극한 생환 사냥', command: '사냥' }
+    : { label: '무한구역 진입', command: moveCommandToward(FRONTIER_ROOM) };
   return { label: '현재 임무 확인', command: '임무' };
 }
 
@@ -2845,15 +2913,16 @@ function bestAutoTeamChoice() {
 function bestAutoExploreChoice() {
   if (character.storyStep < 8 || character.hp <= Math.ceil(character.hpMax * 0.65)) return null;
   if (roomName === '폐광 입구') {
-    return { label: '무한평원 진입', command: '이동 무한평원 01-01' };
+    return { label: '무한구역 진입', command: `이동 ${FRONTIER_ROOM}` };
   }
   if (!frontierCoord(roomName) && character.level >= 2) {
-    return { label: '확장 지역으로 이동', command: moveCommandToward('무한평원 01-01') };
+    return { label: '확장 지역으로 이동', command: moveCommandToward(FRONTIER_ROOM) };
   }
 
   const coord = frontierCoord(roomName);
   if (!coord || Math.random() > 0.45) return null;
   const frontierExits = rooms[roomName].exits.filter((exit) => frontierCoord(exit));
+  if (!frontierExits.length) return null;
   const deeperExit = frontierExits.find((exit) => {
     const next = frontierCoord(exit);
     return next && next.row + next.col > coord.row + coord.col;
@@ -2863,7 +2932,7 @@ function bestAutoExploreChoice() {
 }
 
 function bestFrontierMoveChoice() {
-  if (!frontierCoord(roomName)) return { label: '무한평원 진입', command: moveCommandToward('무한평원 01-01') };
+  if (!frontierCoord(roomName)) return { label: '무한구역 진입', command: moveCommandToward(FRONTIER_ROOM) };
   const coord = frontierCoord(roomName);
   const exits = rooms[roomName].exits.filter((exit) => frontierCoord(exit));
   const nextRoom = exits.find((exit) => {
@@ -2907,6 +2976,76 @@ function bestAutoGambleChoice() {
     { label: `텍사스포커 ${stakeLabel}`, command: `도박 텍사스포커 ${stake}` },
     { label: `검은 룰렛 ${stakeLabel}`, command: `도박 러시안룰렛 ${stake}` }
   ]);
+}
+
+function bestStrategyChoice(context = {}) {
+  const { combatPlan, eventPlan, gearPlan, teamPlan, explorePlan, storyPlan } = context;
+  if (autoStrategy === '빚') {
+    if (character.gambleDebt && character.gold > 0) return { label: '도박 빚 상환', command: '빚갚기' };
+    return combatPlan || eventPlan || storyPlan;
+  }
+  if (autoStrategy === '안정') {
+    if (character.hp < Math.ceil(character.hpMax * 0.85)) return { label: '안정 회복', command: '회복' };
+    return gearPlan || teamPlan || eventPlan || storyPlan || combatPlan;
+  }
+  if (autoStrategy === '파밍') {
+    const fusionReady = character.inventory.filter((item) => !shopItems[item]?.heal).length >= 4
+      ? { label: '파밍품 연성', command: '연성' }
+      : null;
+    return eventPlan || combatPlan || fusionReady || explorePlan || gearPlan || storyPlan;
+  }
+  if (autoStrategy === '보스') {
+    if (character.storyStep >= 8 && !frontierCoord(roomName)) return { label: '무한구역 보스 진입', command: moveCommandToward(FRONTIER_ROOM) };
+    return combatPlan || gearPlan || storyPlan;
+  }
+  if (autoStrategy === '파편') {
+    if (character.storyStep >= 8 && !rogue.active) return { label: '파편 원정 시작', command: '원정' };
+    return combatPlan || eventPlan || storyPlan;
+  }
+  return null;
+}
+
+function setAutoStrategy(input = '') {
+  const normalized = modeKey(input || '균형');
+  const strategy = Object.keys(autoStrategies).find((key) => modeKey(key) === normalized)
+    || Object.keys(autoStrategies).find((key) => modeKey(autoStrategies[key]).includes(normalized));
+  if (!strategy) {
+    append(`자동 전략: ${Object.entries(autoStrategies).map(([key, label]) => `${key}=${label}`).join(' / ')}`);
+    showChoices();
+    return;
+  }
+  autoStrategy = strategy;
+  saveGameState();
+  renderStatusPanel();
+  append(`자동 전략을 ${autoStrategies[strategy]}(으)로 바꿨습니다.`);
+  showChoices();
+}
+
+function nekoPlanChoices() {
+  const stats = effectiveStats();
+  const plan = [];
+  if (character.hp < Math.ceil(character.hpMax * 0.7)) plan.push({ label: '상처를 먼저 회복', command: '회복' });
+  if (character.gambleDebt && character.gold > 0) plan.push({ label: '도박 빚 정리', command: '빚갚기' });
+  if (frontierCoord(roomName)) {
+    plan.push({ label: `${phaseText()} 확인`, command: '위상' });
+    if (stats.defense + stats.spirit < character.level * 4) plan.push({ label: '장비 정비', command: '강화 무기' });
+    plan.push({ label: '무한구역 전투', command: '사냥' });
+  } else {
+    const story = storyChoice();
+    if (story.command !== '임무') plan.push(story);
+    if (character.storyStep >= 8) plan.push({ label: '무한구역 진입', command: moveCommandToward(FRONTIER_ROOM) });
+  }
+  plan.push(bestAutoGearChoice() || { label: '주변 조사', command: '조사' });
+  plan.push(bestAutoTeamChoice() || { label: '네코에게 조언', command: '네코 지금 다음 수를 짜줘' });
+  return plan.filter(Boolean).filter((choice, index, list) => (
+    list.findIndex((item) => item.command === choice.command) === index
+  )).slice(0, 3);
+}
+
+function showNekoPlan() {
+  const plan = nekoPlanChoices();
+  append(`\n[네코 3턴 계획]\n전략: ${autoStrategies[autoStrategy] || autoStrategies.균형}\n위상: ${phaseText()}\n${plan.map((choice, index) => `${index + 1}. ${choice.label} => ${choice.command}`).join('\n')}`, 'neko');
+  showChoices();
 }
 
 function bestAutoMoveChoice() {
@@ -2964,10 +3103,14 @@ function makeChoices() {
     : null;
   const shardChoice = rogue.fragments > 0 ? { label: '파편 상점', command: '파편상점' } : null;
   const debtChoice = character.gambleDebt ? { label: '도박 빚 갚기', command: '빚갚기' } : null;
+  const planChoice = { label: '네코 3턴 계획', command: '계획' };
+  const phaseChoice = frontierCoord(roomName) ? { label: '무한구역 위상', command: '위상' } : null;
   const nextExit = room.exits.find((exit) => !visitedRooms.has(exit)) || room.exits[0] || roomName;
   const raw = [
     storyChoice(),
     heal,
+    planChoice,
+    phaseChoice,
     rogueChoice,
     shardChoice,
     debtChoice,
@@ -3020,6 +3163,7 @@ function bestAutoChoice() {
   const gearPlan = bestAutoGearChoice();
   const teamPlan = bestAutoTeamChoice();
   const explorePlan = bestAutoExploreChoice();
+  const strategyPlan = bestStrategyChoice({ combatPlan, eventPlan, gearPlan, teamPlan, explorePlan, storyPlan });
   if (character.hp <= Math.ceil(character.hpMax * 0.6)) {
     return { label: 'HP 회복', command: '회복' };
   }
@@ -3028,6 +3172,7 @@ function bestAutoChoice() {
       ? { label: '기본기 수련', command: '수련' }
       : { label: '수련장으로 이동', command: moveCommandToward('수련장') };
   }
+  if (strategyPlan) return strategyPlan;
   if (mode === 'story' && storyPlan.command !== '임무') return storyPlan;
   if (mode === 'hunt') return combatPlan || eventPlan || explorePlan || gearPlan || storyPlan;
   if (mode === 'gear') return gearPlan || eventPlan || combatPlan || storyPlan;
@@ -3059,7 +3204,7 @@ function setAutoButton() {
 async function autoTick() {
   if (!connected || !autoProgress || autoBusy) return;
   const mode = currentAutoMode();
-  const forcedMove = autoRoomActions >= 2 && mode !== 'gamble'
+  const forcedMove = autoRoomActions >= 2 && mode !== 'gamble' && !(mode === 'frontier' && frontierCoord(roomName))
     ? (mode === 'frontier' ? bestFrontierMoveChoice() : bestAutoMoveChoice())
     : null;
   const choice = forcedMove || (mode === 'gamble' ? bestAutoChoice() : freshAutoChoice(bestAutoChoice()));
@@ -3283,7 +3428,7 @@ function whisper(input) {
 }
 
 function move(destination) {
-  const target = destination.trim();
+  const target = canonicalRoomName(destination);
   if (!target) {
     append(`이동할 곳을 입력해. 출구: ${rooms[roomName].exits.join(', ')}`);
     return;
@@ -3376,11 +3521,11 @@ function dismissTeamMember(input = '') {
 }
 
 function help() {
-  append(`\n[명령어]\n숫자              추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한평원 자동으로 원정 깊은 곳 탐험\n자동목표 도박     자동으로 도박장 게임 진행\n원정              무한평원 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n파편상점          무한 파편 영구 보너스 상점\n파편구매 체력     파편으로 영구 성장 구매\n빚/빚갚기         도박 빚 확인과 상환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n도박              도박장 게임 목록\n도박 블랙잭 50    블랙잭 판돈 50전\n도박 블랙잭 올인  보유금 전부를 블랙잭에 걸기\n도박 파칭코 올인  보유금 전부를 파칭코에 걸기\n도박 텍사스포커 올인 보유금 전부를 포커에 걸기\n도박 러시안룰렛 올인 보유금 전부를 검은 룰렛에 걸기\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/역참 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/역참에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한평원 / 팀 / 도박\n예) 이동 주막 → 이동 도박장\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한평원 05-05`);
+  append(`\n[명령어]\n숫자              추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한구역 자동으로 단일 극한 구역 탐험\n전략 파밍         자동 진행의 우선 성향 변경\n계획              네코 3턴 계획 보기\n위상/위상변경     무한구역 현재 규칙 확인/전환\n자동목표 도박     자동으로 도박장 게임 진행\n원정              무한구역 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n파편상점          무한 파편 영구 보너스 상점\n파편구매 체력     파편으로 영구 성장 구매\n빚/빚갚기         도박 빚 확인과 상환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n도박              도박장 게임 목록\n도박 블랙잭 50    블랙잭 판돈 50전\n도박 블랙잭 올인  보유금 전부를 블랙잭에 걸기\n도박 파칭코 올인  보유금 전부를 파칭코에 걸기\n도박 텍사스포커 올인 보유금 전부를 포커에 걸기\n도박 러시안룰렛 올인 보유금 전부를 검은 룰렛에 걸기\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/무한구역 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/무한구역에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한구역 / 팀 / 도박\n자동전략: 균형 / 안정 / 파밍 / 보스 / 파편 / 빚\n예) 이동 주막 → 이동 도박장\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한구역`);
 }
 
 function blueprint() {
-  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 레벨업 → 장비 구매/착용/강화 → 팀 역할 조합 → 장소 사건 → 무한평원 권역 탐험.\n로그라이크 축: 원정 시작 → 노드(전투/정예/휴식/상점/보스) 선택 → 유물 획득 → 깊이 5마다 저주 → 탈출 정산.\n진행 방식: 폐광 입구 → 초입초원 → 표지석 벌판 → 낡은역참 → 검은고성터 → 무한전선 → 무한원정 반복.\n확장: 권역, 특수지점, 유물, 저주, 보스 데이터만 더하면 다음 장을 계속 붙일 수 있다.`, 'room');
+  append(`\n[설계도]\n원형 반영: 광장 시작, 환영 안내, 봐/조사, 대화, 공격, 소지품, 장비, 점수, 수련, 저장 흐름.\nRPG 루프: 사냥/수련 → 레벨업 → 장비 구매/착용/강화 → 팀 역할 조합 → 장소 사건 → 무한구역 극한 전투.\n로그라이크 축: 원정 시작 → 단일 전장(보스/전투/사건) 반복 → 유물 획득 → 저주 누적 → 탈출 정산.\n진행 방식: 폐광 입구 → 무한구역 → 10배 강한 적과 전투 → 무한원정 반복.\n확장: 적 특성, 유물, 저주, 보상 테이블을 더하면 단일 구역 안에서 밀도를 높일 수 있다.`, 'room');
 }
 
 function ambientChat() {
@@ -3486,6 +3631,14 @@ async function runCommand(raw) {
   else if (['사용', '마셔', '먹어'].includes(command)) useItem(body);
   else if (['자동', 'auto'].includes(command)) setAutoProgress(!autoProgress);
   else if (['자동목표', '목표', 'mode'].includes(command)) setAutoMode(body);
+  else if (['전략', '자동전략', 'strategy'].includes(command)) setAutoStrategy(body);
+  else if (['계획', '전술', '네코계획', 'plan'].includes(command)) showNekoPlan();
+  else if (['위상', 'phase'].includes(command)) showFrontierPhase();
+  else if (['위상변경', '위상전환', 'phasechange'].includes(command)) {
+    shiftFrontierPhase('수동 전환');
+    commitProgress();
+    showChoices();
+  }
   else if (['귀환', '광장'].includes(command)) move('중앙광장');
   else if (['상태', '스탯', '장비', '아이템', 'status', 'stat'].includes(command)) renderStatusPanel();
   else if (['저장', 'save'].includes(command)) {
