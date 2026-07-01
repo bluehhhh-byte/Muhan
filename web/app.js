@@ -5,9 +5,9 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 6;
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.31.1';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.32.0';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -62,6 +62,7 @@ const statusSections = {
   character: '캐릭터',
   economy: '경제',
   current: '현재상태',
+  director: '자동 디렉터',
   frontier: '무한구역',
   rogue: '무한원정',
   quest: '현재 임무',
@@ -74,7 +75,7 @@ const statusSections = {
   map: '실시간 지도'
 };
 const helpTopics = {
-  자동: ['자동', '자동목표 무한구역', '자동목표 도박', '전략 안정', '전략 파밍', '전략 보스', '전략 파편', '계획'],
+  자동: ['자동', '자동계획', '자동보고', '자동목표 무한구역', '자동목표 도박', '전략 안정', '전략 파밍', '전략 보스', '전략 파편', '계획'],
   전투: ['사냥', '회복', '위상', '위상변경', '원정', '원정종료', '강화 무기'],
   도박: ['도박', '도박 블랙잭 50', '도박 파칭코 올인', '도박 텍사스포커 올인', '도박 러시안룰렛 올인', '빚', '빚갚기'],
   경제: ['경제 투자', '사회 투자', '정보구매 무한구역', '선물 이름', '급여 이름', '돈 장부는 상태창에서 확인'],
@@ -96,7 +97,9 @@ const commandAliases = {
   '무한구역자동': '자동목표 무한구역',
   '상태확인': '상태',
   '스코어': '점수',
-  '가방': '소지품'
+  '가방': '소지품',
+  '디렉터': '자동계획',
+  '자동리포트': '자동보고'
 };
 const balanceConfig = {
   frontierEnemyPower: FRONTIER_ENEMY_POWER,
@@ -112,6 +115,9 @@ const balanceConfig = {
   maxGoldLog: 5,
   maxEconomyConcepts: 8,
   autoRoomActionLimit: 2,
+  autoDirectorQueueLimit: 5,
+  autoReportWindow: 10,
+  autoRepeatLimit: 3,
   defaultGambleStake: 50,
   rouletteSafePayoutRate: 1.15
 };
@@ -843,6 +849,17 @@ let autoRoomCommands = [];
 let autoShopCooldown = 0;
 let autoStallCount = 0;
 let autoStrategy = '균형';
+let autoDirector = {
+  queue: [],
+  lastReason: '입장 대기',
+  turns: 0,
+  startedGold: character.gold,
+  startedExp: character.exp,
+  startedLevel: character.level,
+  actions: [],
+  recentCommands: [],
+  lastReport: '자동 진행 기록 없음'
+};
 let frontierPhaseIndex = 0;
 let visitedRooms = new Set([roomName]);
 let resolvedEvents = new Set();
@@ -1511,9 +1528,144 @@ function setAutoMode(input = '') {
   }
   syncAutoModeOptions();
   autoModeEl.value = mode;
+  refreshAutoDirectorQueue(mode);
   saveGameState();
   renderStatusPanel();
   append(`자동 목표를 ${autoModes[mode]}(으)로 바꿨습니다.`);
+}
+
+function directorGoal(label, reason, choice) {
+  return choice ? { label, reason, choice: { ...choice, directorGoal: label, directorReason: reason } } : null;
+}
+
+function uniqueDirectorGoals(goals) {
+  return goals.filter(Boolean).filter((goal, index, list) => (
+    goal.choice?.command && list.findIndex((item) => item.choice.command === goal.choice.command) === index
+  )).slice(0, balanceConfig.autoDirectorQueueLimit);
+}
+
+function autoDirectorGoals(mode = currentAutoMode()) {
+  const hpRate = character.hp / Math.max(1, character.hpMax);
+  const eventPlan = eventChoice();
+  const combatPlan = encountersForRoom(roomName).length ? { label: '주변 몬스터 사냥', command: '사냥' } : null;
+  const gearPlan = bestAutoGearChoice();
+  const teamPlan = bestAutoTeamChoice();
+  const explorePlan = bestAutoExploreChoice();
+  const storyPlan = storyChoice();
+  const frontierPlan = bestAutoFrontierChoice();
+  const gamblePlan = bestAutoGambleChoice();
+  const strategyPlan = bestStrategyChoice({ combatPlan, eventPlan, gearPlan, teamPlan, explorePlan, storyPlan });
+  const goals = [];
+
+  goals.push(directorGoal('생존 정비', `HP ${Math.round(hpRate * 100)}%라 회복을 우선`, hpRate <= 0.6 ? { label: 'HP 회복', command: '회복' } : null));
+  goals.push(directorGoal('빚 정리', `도박 빚 ${character.gambleDebt || 0}전을 줄여 자동 위험을 낮춤`, character.gambleDebt && character.gold > 0 ? { label: '도박 빚 상환', command: '빚갚기' } : null));
+
+  if (mode === 'gamble') {
+    goals.push(directorGoal('도박 목표', `자동 목표가 ${autoModes[mode]}이고 보유금은 ${character.gold}전`, gamblePlan));
+    goals.push(directorGoal('자금 마련', '도박 자금이 부족하면 전투나 이동으로 판돈을 확보', character.gold < balanceConfig.defaultGambleStake ? combatPlan || explorePlan : null));
+    return uniqueDirectorGoals(goals);
+  }
+
+  if (mode === 'hunt') goals.push(directorGoal('사냥 목표', '사냥 우선 목표라 현재 위험과 전리품을 먼저 처리', combatPlan || eventPlan || explorePlan));
+  if (mode === 'gear') goals.push(directorGoal('장비 목표', '장비 우선 목표라 구매/착용/강화를 먼저 정리', gearPlan || eventPlan || combatPlan));
+  if (mode === 'safe') goals.push(directorGoal('안전 목표', '안전 우선 목표라 회복, 장비, 팀 안정성을 먼저 확보', gearPlan || teamPlan || eventPlan || combatPlan));
+  if (mode === 'explore') goals.push(directorGoal('탐험 목표', '탐험 우선 목표라 미해결 장소와 이동을 먼저 선택', eventPlan || explorePlan || storyPlan));
+  if (mode === 'team') goals.push(directorGoal('팀 목표', '팀 우선 목표라 영입과 관계 관리를 먼저 진행', teamPlan || eventPlan || combatPlan));
+  if (strategyPlan) goals.push(directorGoal('전략 지시', `${autoStrategies[autoStrategy] || autoStrategies.균형} 전략에 맞춘 보정 행동`, strategyPlan));
+
+  if (character.storyStep < story.length - 1) {
+    goals.push(directorGoal('스토리 진행', `${currentQuest().title}: ${currentQuest().hint}`, storyPlan.command !== '임무' ? storyPlan : null));
+  }
+
+  goals.push(directorGoal('장비 정비', gearPlan ? `장비/강화/회복약으로 다음 전투 안정성 확보` : '', gearPlan));
+  goals.push(directorGoal('팀 보강', teamPlan ? `현재 팀 ${team.length}/4명, 역할 균형 보강` : '', teamPlan));
+
+  if (mode === 'frontier' || autoStrategy === '파편' || autoStrategy === '보스') {
+    goals.push(directorGoal('무한원정', rogue.active ? `원정 깊이 ${rogue.depth}, 처치 ${rogue.kills}` : '파편과 유물을 위해 원정 시작', frontierPlan));
+  }
+
+  goals.push(directorGoal('장소 사건', eventPlan ? `${roomName} 사건으로 경험/돈/아이템 확보` : '', eventPlan));
+  goals.push(directorGoal('전투 파밍', combatPlan ? `${roomName} 위험을 처리해 경험과 전리품 확보` : '', combatPlan));
+  goals.push(directorGoal('탐험 이동', explorePlan ? '새 구역이나 다음 스토리 지점으로 이동' : '', explorePlan));
+  goals.push(directorGoal('상태 점검', '선택지가 애매하면 현재 상태를 갱신', { label: '현재 상태 확인', command: '상태' }));
+
+  return uniqueDirectorGoals(goals);
+}
+
+function refreshAutoDirectorQueue(mode = currentAutoMode()) {
+  autoDirector.queue = autoDirectorGoals(mode);
+  return autoDirector.queue;
+}
+
+function directorAutoChoice(mode = currentAutoMode()) {
+  const queue = refreshAutoDirectorQueue(mode);
+  const repeatLimit = balanceConfig.autoRepeatLimit;
+  return queue.find((goal) => {
+    if (goal.choice.command === '회복') return true;
+    const recent = autoDirector.recentCommands.slice(-repeatLimit);
+    return recent.length < repeatLimit || !recent.every((command) => command === goal.choice.command);
+  })?.choice || queue[0]?.choice || null;
+}
+
+function directorReasonFor(choice, forcedMove = null) {
+  if (forcedMove) return '한 장소 행동 제한에 도달해 이동을 우선';
+  return choice?.directorReason || choice?.directorGoal || '네코 디렉터 기본 판단';
+}
+
+function resetAutoDirectorSession() {
+  autoDirector.turns = 0;
+  autoDirector.startedGold = character.gold;
+  autoDirector.startedExp = character.exp;
+  autoDirector.startedLevel = character.level;
+  autoDirector.actions = [];
+  autoDirector.recentCommands = [];
+  autoDirector.lastReason = '자동 진행 시작';
+  autoDirector.lastReport = '자동 진행 기록 없음';
+  refreshAutoDirectorQueue();
+}
+
+function recordAutoDirectorStep(choice, before) {
+  autoDirector.turns += 1;
+  const goldDelta = character.gold - before.gold;
+  const expDelta = character.exp - before.exp + Math.max(0, character.level - before.level) * before.expToLevel;
+  const hpDelta = character.hp - before.hp;
+  const action = {
+    command: choice.command,
+    goal: choice.directorGoal || '일반',
+    reason: choice.directorReason || '',
+    room: before.room,
+    goldDelta,
+    expDelta,
+    hpDelta
+  };
+  autoDirector.actions = [action].concat(autoDirector.actions).slice(0, balanceConfig.autoReportWindow);
+  autoDirector.recentCommands = autoDirector.recentCommands.concat(choice.command).slice(-balanceConfig.autoReportWindow);
+  autoDirector.lastReason = action.reason || action.goal;
+  const totalGold = character.gold - autoDirector.startedGold;
+  const totalExp = character.exp - autoDirector.startedExp;
+  autoDirector.lastReport = `최근 ${autoDirector.actions.length}턴 / 총 ${autoDirector.turns}턴 / 돈 ${totalGold >= 0 ? '+' : ''}${totalGold}전 / 현재 EXP ${totalExp >= 0 ? '+' : ''}${totalExp}`;
+}
+
+function autoDirectorPlanText() {
+  const queue = refreshAutoDirectorQueue();
+  return queue.map((goal, index) => `${index + 1}. ${goal.label}: ${goal.choice.label} => ${goal.choice.command}\n   판단: ${goal.reason || '기본 우선순위'}`).join('\n') || '대기 중';
+}
+
+function autoDirectorReportText() {
+  const actions = autoDirector.actions.length
+    ? autoDirector.actions.map((action, index) => `${index + 1}. ${action.goal} / ${action.command} / 돈 ${action.goldDelta >= 0 ? '+' : ''}${action.goldDelta} / HP ${action.hpDelta >= 0 ? '+' : ''}${action.hpDelta}`)
+    : ['아직 자동 진행 기록이 없습니다.'];
+  return `[자동 보고]\n${autoDirector.lastReport}\n최근 판단: ${autoDirector.lastReason}\n${actions.join('\n')}`;
+}
+
+function showAutoDirectorPlan() {
+  append(`\n[네코 디렉터]\n목표: ${autoModes[currentAutoMode()]} / 전략 ${autoStrategies[autoStrategy] || autoStrategies.균형}\n${autoDirectorPlanText()}`, 'neko');
+  showChoices();
+}
+
+function showAutoDirectorReport() {
+  append(`\n${autoDirectorReportText()}`, 'neko');
+  showChoices();
 }
 
 function frontierMapText() {
@@ -1570,6 +1722,16 @@ function saveGameState() {
       economy,
       goldLog,
       autoStrategy,
+      autoDirector: {
+        turns: autoDirector.turns,
+        startedGold: autoDirector.startedGold,
+        startedExp: autoDirector.startedExp,
+        startedLevel: autoDirector.startedLevel,
+        actions: autoDirector.actions,
+        recentCommands: autoDirector.recentCommands,
+        lastReason: autoDirector.lastReason,
+        lastReport: autoDirector.lastReport
+      },
       frontierPhaseIndex,
       nekoTraining,
       aiBirthSeq,
@@ -1663,6 +1825,19 @@ function loadGameState() {
     goldLog = saved.goldLog.filter(Boolean).slice(0, balanceConfig.maxGoldLog);
   }
   if (autoStrategies[saved.autoStrategy]) autoStrategy = saved.autoStrategy;
+  if (saved.autoDirector && typeof saved.autoDirector === 'object') {
+    autoDirector = {
+      ...autoDirector,
+      turns: Math.max(0, Number(saved.autoDirector.turns) || 0),
+      startedGold: Math.max(0, Number(saved.autoDirector.startedGold) || character.gold),
+      startedExp: Math.max(0, Number(saved.autoDirector.startedExp) || character.exp),
+      startedLevel: Math.max(1, Number(saved.autoDirector.startedLevel) || character.level),
+      actions: Array.isArray(saved.autoDirector.actions) ? saved.autoDirector.actions.filter((action) => action && action.command).slice(0, balanceConfig.autoReportWindow) : [],
+      recentCommands: Array.isArray(saved.autoDirector.recentCommands) ? saved.autoDirector.recentCommands.filter(Boolean).slice(-balanceConfig.autoReportWindow) : [],
+      lastReason: String(saved.autoDirector.lastReason || autoDirector.lastReason),
+      lastReport: String(saved.autoDirector.lastReport || autoDirector.lastReport)
+    };
+  }
   frontierPhaseIndex = Math.max(0, Number(saved.frontierPhaseIndex) || 0) % frontierPhases.length;
   if (saved.nekoTraining && typeof saved.nekoTraining === 'object') {
     nekoTraining = {
@@ -1737,12 +1912,15 @@ function loadGameState() {
   for (const slot of ['무기', '방어구', '장신구']) {
     character.upgrades[slot] = Math.max(0, Number(character.upgrades[slot]) || 0);
   }
+  refreshAutoDirectorQueue();
 }
 
 function renderStatusPanel() {
   const neko = nekoProfile();
   const growth = growthForJob();
   const stats = effectiveStats();
+  const directorQueue = autoDirector.queue.length ? autoDirector.queue : autoDirectorGoals(currentAutoMode());
+  const directorLines = directorQueue.slice(0, 3).map((goal, index) => `${index + 1}. ${goal.label} -> ${goal.choice.command}`);
   const debtors = Object.entries(aiDebt)
     .filter(([, debt]) => Number(debt) > 0)
     .sort((a, b) => b[1] - a[1])
@@ -1789,6 +1967,11 @@ function renderStatusPanel() {
     `자동 목표: ${autoModes[currentAutoMode()]}`,
     `자동 전략: ${autoStrategies[autoStrategy] || autoStrategies.균형}`,
     `흉터: ${scarSummary()}`,
+    '',
+    `[${statusSections.director}]`,
+    `최근 판단: ${autoDirector.lastReason}`,
+    `목표 큐: ${directorLines.join(' / ') || '대기'}`,
+    `최근 보고: ${autoDirector.lastReport}`,
     '',
     `[${statusSections.frontier}]`,
     `위상: ${phaseText()}`,
@@ -2854,7 +3037,7 @@ function fallbackNeko(question = '') {
   if (/지도|맵|map/.test(q)) return `지도는 "지도"라고 입력하면 볼 수 있어. 현재 위치는 ${roomName}이야.`;
   if (/어디|위치|길|가야|이동/.test(q)) return `지금은 ${roomName}. 갈 수 있는 곳은 ${rooms[roomName].exits.join(', ')}야.`;
   if (/팀|파티|동료/.test(q)) return '마음에 드는 유저에게 "팀 이름"이라고 해. 해고는 "팀해고 이름", 교체는 "팀교체 기존 새", 해산은 "팀해산"이야.';
-  if (/자동|목표|모드/.test(q)) return '자동목표 스토리, 자동목표 사냥, 자동목표 장비, 자동목표 안전, 자동목표 탐험, 자동목표 무한구역, 자동목표 팀, 자동목표 도박을 쓸 수 있어.';
+  if (/자동|목표|모드/.test(q)) return '자동계획과 자동보고로 네코 디렉터의 판단을 확인하고, 자동목표 스토리/사냥/장비/안전/탐험/무한구역/팀/도박을 바꿀 수 있어.';
   if (/돈|경제|투자|급여|선물|정보|치료소|도박|블랙잭|파칭코|포커/.test(q)) return `시장지수는 ${economy.index}, 새 개념은 ${economy.concepts.join(', ') || '아직 없음'}이야. 돈은 "네코훈련 행운", "선물 이름", "정보구매", "치료소", "연성 투자", "경제 투자", "도박 블랙잭 50", "도박 파칭코 올인", "빚갚기"로 움직여.`;
   if (/강화|업그레이드/.test(q)) return `장터에서 "강화 무기"처럼 입력하면 돼. 다음 무기 강화 비용은 ${upgradeCost('무기')} 전이야.`;
   if (/연성|조합|융합|합성|도박/.test(q)) return `보관함 아이템이 2개 이상이면 "연성"으로 새 장비를 만들 수 있어. 내 행운은 ${nekoProfile().luck}이라 결과가 조금 흔들려.`;
@@ -2901,7 +3084,7 @@ function buildSystemInstruction() {
     '항상 무한대전 세계관 안에서 답하고, 1~3문장으로 짧게 한국어로 말한다.',
     '축적 지식과 최근 기억을 근거로 다음 행동을 더 똑똑하게 추천한다.',
     '플레이어가 다음 행동을 고르기 쉽게 장소, 위험, 동료 후보를 짧게 짚어준다.',
-    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 위상, 위상변경, 도움 자동, 도움 전투, 도움 도박, 전략 안정, 전략 파밍, 전략 보스, 전략 파편, 계획, 파편상점, 파편구매 체력, 파편구매 저주저항, 빚, 빚갚기, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 이동 도박장, 도박 블랙잭 50, 도박 파칭코 50, 도박 텍사스포커 50, 도박 러시안룰렛 50, 도박 블랙잭 올인, 도박 파칭코 올인, 도박 텍사스포커 올인, 도박 러시안룰렛 올인, 자동목표 도박, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한구역, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
+    '사용 가능한 명령어를 자연스럽게 추천한다: 환영, 임무, 지도, 조사, 사건, 대화 대상, 사냥, 수련, 회복, 원정, 원정종료, 위상, 위상변경, 도움 자동, 도움 전투, 도움 도박, 전략 안정, 전략 파밍, 전략 보스, 전략 파편, 계획, 자동계획, 자동보고, 파편상점, 파편구매 체력, 파편구매 저주저항, 빚, 빚갚기, 연성, 연성 투자, 네코훈련 행운, 선물 이름, 정보구매 장소, 치료소, 저주해제, 경제 투자, 사회 투자, 이동 도박장, 도박 블랙잭 50, 도박 파칭코 50, 도박 텍사스포커 50, 도박 러시안룰렛 50, 도박 블랙잭 올인, 도박 파칭코 올인, 도박 텍사스포커 올인, 도박 러시안룰렛 올인, 자동목표 도박, 구매 회복약, 구매 청동검, 착용 청동검, 강화 무기, 자동목표 탐험, 자동목표 무한구역, 점수, 소지품, 사용 회복약, 이동 장소, 팀 이름, 팀해고 이름, 팀교체 기존 새, 팀해산.'
   ].join('\n');
 }
 
@@ -3342,7 +3525,7 @@ async function autoTick() {
     const forcedMove = autoRoomActions >= balanceConfig.autoRoomActionLimit && mode !== 'gamble' && !(mode === 'frontier' && frontierCoord(roomName))
       ? (mode === 'frontier' ? bestFrontierMoveChoice() : bestAutoMoveChoice())
       : null;
-    let choice = forcedMove || (mode === 'gamble' ? bestAutoChoice() : freshAutoChoice(bestAutoChoice()));
+    let choice = forcedMove || directorAutoChoice(mode) || (mode === 'gamble' ? bestAutoChoice() : freshAutoChoice(bestAutoChoice()));
     if (!choice) {
       autoStallCount += 1;
       choice = autoStallCount >= 2 ? safeAutoFallbackChoice(mode) : null;
@@ -3352,10 +3535,28 @@ async function autoTick() {
       return;
     }
     autoStallCount = 0;
+    if (forcedMove) {
+      choice = {
+        ...choice,
+        directorGoal: '장소 전환',
+        directorReason: '한 장소 행동 제한에 도달해 다음 장소로 이동'
+      };
+    }
+    const before = {
+      room: roomName,
+      gold: character.gold,
+      exp: character.exp,
+      expToLevel: character.expToLevel,
+      hp: character.hp,
+      level: character.level
+    };
     const beforeRoom = roomName;
     const wasShopRoom = canShopHere();
-    append(`\n[자동 진행]\n${forcedMove ? `장소 행동 ${balanceConfig.autoRoomActionLimit}회 완료. ` : ''}네코가 "${choice.label}"을 선택했다.\n=> ${choice.command}`, 'neko');
+    const goalLabel = forcedMove ? '장소 전환' : choice.directorGoal || '일반 진행';
+    const reason = directorReasonFor(choice, forcedMove);
+    append(`\n[자동 진행]\n${forcedMove ? `장소 행동 ${balanceConfig.autoRoomActionLimit}회 완료. ` : ''}네코가 "${choice.label}"을 선택했다.\n목표: ${goalLabel}\n판단: ${reason}\n=> ${choice.command}`, 'neko');
     await runCommand(choice.command);
+    recordAutoDirectorStep(choice, before);
     if (wasShopRoom && isShopCommand(choice.command)) autoShopCooldown = 3;
     else if (autoShopCooldown > 0) autoShopCooldown -= 1;
     if (choice.command.startsWith('이동 ') || roomName !== beforeRoom) {
@@ -3365,6 +3566,9 @@ async function autoTick() {
       autoRoomActions += 1;
       autoRoomCommands.push(choice.command);
     }
+    refreshAutoDirectorQueue(mode);
+    renderStatusPanel();
+    saveGameState();
   } catch (error) {
     append(`\n[자동 오류]\n자동 진행을 멈췄습니다. ${error.message || error}\n네코: 화면이 멈춘 게 아니라, 내가 꼬리를 밟은 거야. 상태를 보존했으니 다시 켜도 돼.`, 'neko');
     setAutoProgress(false);
@@ -3384,6 +3588,7 @@ function setAutoProgress(value) {
     autoRoomCommands = [];
     autoShopCooldown = 0;
     autoStallCount = 0;
+    resetAutoDirectorSession();
     autoTimer = window.setInterval(autoTick, nekoProfile().autoDelay);
     appendNeko('자동 진행을 시작할게. 위험하면 언제든 다시 눌러서 멈춰.');
   } else if (connected) {
@@ -3672,7 +3877,7 @@ function help(topic = '') {
     showChoices();
     return;
   }
-  append(`\n[명령어]\n숫자              추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동목표 무한구역 자동으로 단일 극한 구역 탐험\n도움 자동/전투/도박 주제별 도움말 보기\n전략 파밍         자동 진행의 우선 성향 변경\n계획              네코 3턴 계획 보기\n위상/위상변경     무한구역 현재 규칙 확인/전환\n자동목표 도박     자동으로 도박장 게임 진행\n원정              무한구역 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n파편상점          무한 파편 영구 보너스 상점\n파편구매 체력     파편으로 영구 성장 구매\n빚/빚갚기         도박 빚 확인과 상환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n도박              도박장 게임 목록\n도박 블랙잭 50    블랙잭 판돈 50전\n도박 블랙잭 올인  보유금 전부를 블랙잭에 걸기\n도박 파칭코 올인  보유금 전부를 파칭코에 걸기\n도박 텍사스포커 올인 보유금 전부를 포커에 걸기\n도박 러시안룰렛 올인 보유금 전부를 검은 룰렛에 걸기\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/무한구역 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/무한구역에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한구역 / 팀 / 도박\n자동전략: 균형 / 안정 / 파밍 / 보스 / 파편 / 빚\n도움 주제: 자동 / 전투 / 도박 / 경제 / 네코 / 팀 / 무한구역\n예) 이동 주막 → 이동 도박장\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한구역`);
+  append(`\n[명령어]\n숫자              추천 행동 선택\n자동              자동 진행 켜기/끄기\n자동계획          네코 디렉터의 자동 목표 큐 보기\n자동보고          최근 자동 진행 판단과 손익 보기\n자동목표 무한구역 자동으로 단일 극한 구역 탐험\n도움 자동/전투/도박 주제별 도움말 보기\n전략 파밍         자동 진행의 우선 성향 변경\n계획              네코 3턴 계획 보기\n위상/위상변경     무한구역 현재 규칙 확인/전환\n자동목표 도박     자동으로 도박장 게임 진행\n원정              무한구역 로그라이크 원정 시작/상태\n원정종료/탈출     유물과 저주를 정산하고 광장 귀환\n파편상점          무한 파편 영구 보너스 상점\n파편구매 체력     파편으로 영구 성장 구매\n빚/빚갚기         도박 빚 확인과 상환\n연성/연성 투자    보관 아이템을 유료 합성, 투자 시 저주 확률 감소\n네코훈련 행운     돈을 써서 네코 전투/행운/조언 훈련\n선물 이름/급여    동료에게 돈을 써서 신뢰 상승\n정보구매 장소     돈을 내고 다음 위험과 사건 확인\n치료소/저주해제   돈을 내고 부상 치료나 원정 저주 해제\n경제 투자         AI 유저 사이 투자/파산/고용/기부 사건\n사회 투자         AI 사회사건으로 경제 사건 발생\n도박              도박장 게임 목록\n도박 블랙잭 50    블랙잭 판돈 50전\n도박 블랙잭 올인  보유금 전부를 블랙잭에 걸기\n도박 파칭코 올인  보유금 전부를 파칭코에 걸기\n도박 텍사스포커 올인 보유금 전부를 포커에 걸기\n도박 러시안룰렛 올인 보유금 전부를 검은 룰렛에 걸기\n사회              AI 유저 사회 사건 발생\n환영              초보 안내\n임무              현재 스토리 목표\n지도              전체 지도 보기\n보기              현재 장소 보기\n조사              장소/NPC/위험/사건 조사\n사건              현재 장소 사건 처리\n대화 대상         고정 NPC와 대화\n사냥/공격         현재 방 몬스터와 전투\n수련              경험치를 얻고 자동 레벨업\n회복              동료/네코/회복지점 회복\n품목              장터/무한구역 상품 보기\n구매 회복약       회복 아이템 구매\n구매 청동검       장비 구매\n착용 장비명       장비 착용\n강화 무기         장터/무한구역에서 장비 강화\n점수              캐릭터 점수 보기\n소지품            보관 아이템 보기\n네코기억          네코의 축적 지식 확인\n사용 회복약       회복약 사용\n상태              상태창 갱신\n저장              현재 진행 저장\n유저              AI 유저와 특수능력/보유금 보기\n말 내용           주변 유저와 대화\n귓 이름 내용      특정 유저에게 말하기\n팀 이름           AI 유저를 동료로 영입\n팀해고 이름       팀원 해고\n팀교체 기존 새    팀원 교체\n팀해산            팀 해산\n이동 장소         장소 이동\n네코 질문         Gemini 네코에게 묻기\n\n자동목표: 스토리 / 사냥 / 장비 / 안전 / 탐험 / 무한구역 / 팀 / 도박\n자동전략: 균형 / 안정 / 파밍 / 보스 / 파편 / 빚\n도움 주제: 자동 / 전투 / 도박 / 경제 / 네코 / 팀 / 무한구역\n예) 이동 주막 → 이동 도박장\n예) 경제 투자\n예) 사회 파산\n예) 정보구매 무한구역`);
   showChoices();
 }
 
@@ -3782,6 +3987,8 @@ async function runCommand(raw) {
   else if (['네코기억', '기억', '학습'].includes(command)) showNekoMemory();
   else if (['사용', '마셔', '먹어'].includes(command)) useItem(body);
   else if (['자동', 'auto'].includes(command)) setAutoProgress(!autoProgress);
+  else if (['자동계획', '자동계획표', '디렉터', 'director'].includes(command)) showAutoDirectorPlan();
+  else if (['자동보고', '자동리포트', '리포트', 'autoreport'].includes(command)) showAutoDirectorReport();
   else if (['자동목표', '목표', 'mode'].includes(command)) setAutoMode(body);
   else if (['전략', '자동전략', 'strategy'].includes(command)) setAutoStrategy(body);
   else if (['계획', '전술', '네코계획', 'plan'].includes(command)) showNekoPlan();

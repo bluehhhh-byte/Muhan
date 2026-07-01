@@ -106,7 +106,7 @@ const scarTest = vm.runInNewContext('(() => { const oldScars = character.scars.s
 if (scarTest[0] !== 1 || !scarTest[1].includes('흉터') || !scarTest[2]) throw new Error('패배 흉터/보정 실패');
 vm.runInNewContext('(() => { const oldGold = character.gold; const oldDebt = character.gambleDebt; const oldFragments = rogue.fragments; const oldGoldLog = goldLog.slice(); const oldStrategy = autoStrategy; const oldPhase = frontierPhaseIndex; const oldScars = character.scars.slice(); changeGold(12, "테스트 수입"); rogue.fragments = 2; character.gambleDebt = 9; autoStrategy = "파밍"; frontierPhaseIndex = 2; character.scars = [{ name: "테스트 흉터" }]; saveGameState(); character.gold = oldGold; character.gambleDebt = oldDebt; rogue.fragments = oldFragments; goldLog = oldGoldLog; autoStrategy = oldStrategy; frontierPhaseIndex = oldPhase; character.scars = oldScars; })()', context);
 const savedState = JSON.parse(storage['muhan.game.state']);
-if (savedState.saveVersion !== 5 || savedState.autoStrategy !== '파밍' || savedState.frontierPhaseIndex !== 2 || !Array.isArray(savedState.goldLog) || savedState.character.gambleDebt !== 9 || !savedState.character.scars.length || savedState.rogue.fragments !== 2 || !savedState.rogue.perks) throw new Error('저장 버전/경제/파편/전략 상태 저장 실패');
+if (savedState.saveVersion !== 6 || savedState.autoStrategy !== '파밍' || !savedState.autoDirector || savedState.frontierPhaseIndex !== 2 || !Array.isArray(savedState.goldLog) || savedState.character.gambleDebt !== 9 || !savedState.character.scars.length || savedState.rogue.fragments !== 2 || !savedState.rogue.perks) throw new Error('저장 버전/경제/파편/전략 상태 저장 실패');
 delete storage['muhan.game.state'];
 const balanceProbe = vm.runInNewContext('(() => { const oldLevel = character.level; const oldHpMax = character.hpMax; const oldHp = character.hp; const oldAttack = character.attack; const oldDefense = character.defense; const oldSpirit = character.spirit; const oldEquipment = character.equipment; const oldRoom = roomName; const oldRogue = JSON.parse(JSON.stringify(rogue)); character.level = 5; character.hpMax = 78; character.hp = 78; character.attack = 18; character.defense = 11; character.spirit = 6; character.equipment = { 무기: "철검", 방어구: "철갑옷", 장신구: "사냥꾼 부적", 동료: "네코" }; roomName = "무한구역"; rogue.active = false; const regular = encountersForRoom(roomName).find((monster) => monster.trait !== "우두머리"); rogue = { ...rogue, active: true, depth: 1, maxDepth: 1, kills: 0, relics: [], curses: [], nodes: ["무한구역"] }; recordRogueCombat({ name: "테스트 몬스터" }); const result = [regular.level, regular.hp, regular.exp, regular.gold, rogue.depth, rogue.maxDepth, balanceConfig.rouletteSafePayoutRate]; character.level = oldLevel; character.hpMax = oldHpMax; character.hp = oldHp; character.attack = oldAttack; character.defense = oldDefense; character.spirit = oldSpirit; character.equipment = oldEquipment; roomName = oldRoom; rogue = oldRogue; return result; })()', context);
 if (balanceProbe[0] > 24 || balanceProbe[1] > 420 || balanceProbe[2] > 6000 || balanceProbe[3] > 2500) throw new Error('무한구역 일반몹 밸런스 상한 실패');
@@ -124,7 +124,7 @@ async function submit(command) {
 
 (async () => {
   elements.gameConnect.listeners.click();
-  const autoCrashGuard = await vm.runInNewContext('(async () => { const oldConnected = connected; const oldAuto = autoProgress; const oldBusy = autoBusy; const oldBest = bestAutoChoice; connected = true; autoProgress = true; autoBusy = false; bestAutoChoice = () => { throw new Error("테스트 자동 오류"); }; await autoTick(); const result = [autoProgress, autoBusy, screenEl.children.map((child) => child.textContent).join("\\n").includes("[자동 오류]")]; bestAutoChoice = oldBest; connected = oldConnected; autoProgress = oldAuto; autoBusy = oldBusy; setAutoButton(); return result; })()', context);
+  const autoCrashGuard = await vm.runInNewContext('(async () => { const oldConnected = connected; const oldAuto = autoProgress; const oldBusy = autoBusy; const oldDirector = directorAutoChoice; connected = true; autoProgress = true; autoBusy = false; directorAutoChoice = () => { throw new Error("테스트 자동 오류"); }; await autoTick(); const result = [autoProgress, autoBusy, screenEl.children.map((child) => child.textContent).join("\\n").includes("[자동 오류]")]; directorAutoChoice = oldDirector; connected = oldConnected; autoProgress = oldAuto; autoBusy = oldBusy; setAutoButton(); return result; })()', context);
   if (autoCrashGuard[0] !== false || autoCrashGuard[1] !== false || !autoCrashGuard[2]) throw new Error('자동 진행 오류 복구 실패');
   if (!elements.autoMode.children.some((option) => option.value === 'gamble')) throw new Error('도박 자동 목표 옵션 누락');
   elements.autoMode.value = 'gamble';
@@ -152,9 +152,14 @@ async function submit(command) {
   if (!screenText().includes('표식: X 압축 전장 / 적 전투력 x10')) throw new Error('무한구역 지도 표식 실패');
   if (!elements.statusPanel.textContent.includes('[실시간 지도]') || !elements.statusPanel.textContent.includes('[중앙광장]')) throw new Error('상태창 실시간 지도 표시 실패');
   if (!elements.statusPanel.textContent.includes('자동 목표: 스토리 우선')) throw new Error('자동 목표 기본값 표시 실패');
+  if (!elements.statusPanel.textContent.includes('[자동 디렉터]')) throw new Error('자동 디렉터 상태 표시 실패');
   if (!elements.statusPanel.textContent.includes('[요약]') || !elements.statusPanel.textContent.includes('전략 균형')) throw new Error('상태 요약 표시 실패');
   await submit('도움 자동');
   if (!screenText().includes('[도움: 자동]') || !screenText().includes('전략 파밍')) throw new Error('주제별 도움말 실패');
+  await submit('자동계획');
+  if (!screenText().includes('[네코 디렉터]') || !screenText().includes('판단:')) throw new Error('자동 디렉터 계획 표시 실패');
+  await submit('자동보고');
+  if (!screenText().includes('[자동 보고]')) throw new Error('자동 디렉터 보고 표시 실패');
   const seedBeforeGambling = seed;
   await submit('이동 주막');
   await submit('이동 도박장');
@@ -173,8 +178,11 @@ async function submit(command) {
   await submit('자동목표 도박우선');
   if (!elements.statusPanel.textContent.includes('자동 목표: 도박 우선')) throw new Error('도박 자동 목표 붙여쓰기 변경 실패');
   await submit('자동');
+  const beforeGambleAuto = screenText();
   await context.autoTick();
-  if (!screenText().includes('=> 도박 ')) throw new Error('도박 우선 자동 진행 실패');
+  const gambleAutoLog = screenText().slice(beforeGambleAuto.length);
+  if (!gambleAutoLog.includes('=> 도박 ')) throw new Error('도박 우선 자동 진행 실패');
+  if (!gambleAutoLog.includes('판단:') || !elements.statusPanel.textContent.includes('최근 보고: 최근')) throw new Error('자동 디렉터 판단/보고 갱신 실패');
   await submit('자동');
   await submit('이동 주막');
   await submit('이동 중앙광장');
@@ -318,6 +326,7 @@ async function submit(command) {
   await context.autoTick();
   const autoLog = screenText().slice(beforeAuto.length);
   if (!screenText().includes('[팀 신뢰]')) throw new Error('자동 사냥 실행 실패');
+  if (!autoLog.includes('판단:') || !autoLog.includes('목표:')) throw new Error('자동 진행 디렉터 판단 로그 실패');
   if ((autoLog.match(/=> 사냥/g) || []).length > 1) throw new Error('자동 진행이 같은 방에서 사냥만 반복함');
   if (!/=> (회복|팀|사건|조사|귓|강화|구매|수련|연성)/.test(autoLog)) throw new Error('자동 진행 대체 행동 선택 실패');
   await context.autoTick();
