@@ -5,9 +5,9 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
-const SAVE_VERSION = 7;
+const SAVE_VERSION = 8;
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.32.1';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.32.2';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -117,7 +117,10 @@ const balanceConfig = {
   maxInventoryItems: 120,
   maxInventoryStatusDisplay: 24,
   maxInventoryCommandDisplay: 60,
-  maxSaveBytes: 4000000,
+  maxSaveBytes: 1000000,
+  maxMemoryBytes: 80000,
+  maxSettingsBytes: 80000,
+  maxPromptChars: 800,
   autoRoomActionLimit: 2,
   autoDirectorQueueLimit: 5,
   autoReportWindow: 10,
@@ -906,25 +909,69 @@ function defaultNekoMemory() {
   return { level: 1, exp: 0, conversations: 0, battles: 0, events: 0, expeditions: 0, fusions: 0, notes: [] };
 }
 
-function loadNekoMemory() {
+function addStorageWarning(text) {
+  saveLoadWarning = saveLoadWarning ? `${saveLoadWarning}\n${text}` : text;
+}
+
+function safeRemoveStorage(key) {
   try {
-    const saved = JSON.parse(localStorage.getItem(NEKO_MEMORY_KEY) || '{}');
-    return {
-      ...defaultNekoMemory(),
-      ...saved,
-      notes: Array.isArray(saved.notes) ? saved.notes.slice(0, 8) : []
-    };
+    localStorage.removeItem(key);
   } catch (error) {
-    return defaultNekoMemory();
+    // 삭제가 막힌 브라우저에서는 다음 부팅 때 다시 검사한다.
   }
 }
 
-function saveNekoMemory() {
+function safeReadJsonStorage(key, fallback, maxBytes, label) {
   try {
-    localStorage.setItem(NEKO_MEMORY_KEY, JSON.stringify(nekoMemory));
+    const raw = localStorage.getItem(key) || '';
+    if (!raw) return fallback;
+    if (raw.length > maxBytes) {
+      safeRemoveStorage(key);
+      addStorageWarning(`${label} 저장이 ${(raw.length / 1024).toFixed(0)}KB로 커져 Chrome 멈춤 방지를 위해 정리했습니다.`);
+      return fallback;
+    }
+    return JSON.parse(raw);
   } catch (error) {
-    // 저장소가 막힌 브라우저에서는 현재 세션 기억만 쓴다.
+    safeRemoveStorage(key);
+    addStorageWarning(`${label} 저장을 읽지 못해 안전 기본값으로 시작했습니다.`);
+    return fallback;
   }
+}
+
+function safeWriteJsonStorage(key, value, maxBytes, label) {
+  try {
+    const raw = JSON.stringify(value);
+    if (raw.length > maxBytes) {
+      addStorageWarning(`${label} 저장이 너무 커져 이번 변경은 브라우저 저장소에 쓰지 않았습니다.`);
+      return false;
+    }
+    localStorage.setItem(key, raw);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+function normalizeNekoMemory(saved = {}) {
+  return {
+    ...defaultNekoMemory(),
+    level: Math.max(1, Math.min(999, Number(saved.level) || 1)),
+    exp: Math.max(0, Math.min(999999, Number(saved.exp) || 0)),
+    conversations: Math.max(0, Number(saved.conversations) || 0),
+    battles: Math.max(0, Number(saved.battles) || 0),
+    events: Math.max(0, Number(saved.events) || 0),
+    expeditions: Math.max(0, Number(saved.expeditions) || 0),
+    fusions: Math.max(0, Number(saved.fusions) || 0),
+    notes: Array.isArray(saved.notes) ? saved.notes.map((note) => String(note).slice(0, 70)).slice(0, 8) : []
+  };
+}
+
+function loadNekoMemory() {
+  return normalizeNekoMemory(safeReadJsonStorage(NEKO_MEMORY_KEY, {}, balanceConfig.maxMemoryBytes, '네코 기억'));
+}
+
+function saveNekoMemory() {
+  safeWriteJsonStorage(NEKO_MEMORY_KEY, normalizeNekoMemory(nekoMemory), balanceConfig.maxMemoryBytes, '네코 기억');
 }
 
 function rememberNeko(kind, note = '', amount = 1) {
@@ -1717,7 +1764,7 @@ function nekoProfile() {
 function saveGameState() {
   try {
     compactInventory();
-    localStorage.setItem(GAME_STATE_KEY, JSON.stringify({
+    safeWriteJsonStorage(GAME_STATE_KEY, {
       saveVersion: SAVE_VERSION,
       roomName: canonicalRoomName(roomName),
       team,
@@ -1782,26 +1829,14 @@ function saveGameState() {
         upgrades: character.upgrades,
         inventory: character.inventory
       }
-    }));
+    }, balanceConfig.maxSaveBytes, '게임 진행');
   } catch (error) {
     // 저장소가 막힌 브라우저에서는 현재 세션만 유지한다.
   }
 }
 
 function loadGameState() {
-  let saved = {};
-  try {
-    const rawState = localStorage.getItem(GAME_STATE_KEY) || '{}';
-    if (rawState.length > balanceConfig.maxSaveBytes) {
-      localStorage.removeItem(GAME_STATE_KEY);
-      saveLoadWarning = `이전 브라우저 저장이 ${(rawState.length / 1024 / 1024).toFixed(1)}MB로 커져 Chrome이 멈출 수 있어 새 세션으로 정리했습니다.`;
-      return;
-    }
-    saved = JSON.parse(rawState);
-  } catch (error) {
-    saveLoadWarning = '이전 브라우저 저장을 읽지 못해 새 세션으로 시작했습니다.';
-    return;
-  }
+  const saved = safeReadJsonStorage(GAME_STATE_KEY, {}, balanceConfig.maxSaveBytes, '게임 진행');
   const savedRoom = canonicalRoomName(saved.roomName);
   if (rooms[savedRoom]) roomName = savedRoom;
   if (Array.isArray(saved.visitedRooms)) {
@@ -2654,12 +2689,29 @@ function commitProgress() {
   saveGameState();
 }
 
+function settingMaxLength(key) {
+  if (key === 'prompt') return balanceConfig.maxPromptChars;
+  if (key === 'ability') return 180;
+  if (['tone', 'gender'].includes(key)) return 120;
+  if (key === 'model') return 80;
+  return 60;
+}
+
+function sanitizeSettingValue(key, value) {
+  if (key === 'level') return String(Math.max(1, Math.min(99, Number(value) || 7)));
+  if (key === 'luck') return String(Math.max(0, Math.min(99, Number(value) || 7)));
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, settingMaxLength(key));
+  return key === 'model' && text === 'gemini-3.5-flash' ? DEFAULT_MODEL : text;
+}
+
 function currentSettings() {
-  return Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, field.value.trim()]));
+  return Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, sanitizeSettingValue(key, field.value)]));
 }
 
 function saveSettings() {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(currentSettings()));
+  const settings = currentSettings();
+  Object.entries(settings).forEach(([key, value]) => { fields[key].value = value; });
+  safeWriteJsonStorage(SETTINGS_KEY, settings, balanceConfig.maxSettingsBytes, '네코 설정');
   nekoInteractionId = null;
   setGeminiStatus('저장됨');
   append('설정이 저장되었습니다. 네코의 대화 연결만 새로 시작하고 축적 지식은 유지합니다.');
@@ -2681,10 +2733,10 @@ function loadSettings() {
     ability: '길찾기와 명령어 해석',
     prompt: randomSettings.prompt[0]
   };
-  const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+  const saved = safeReadJsonStorage(SETTINGS_KEY, {}, balanceConfig.maxSettingsBytes, '네코 설정');
   const values = { ...defaults };
   for (const key of Object.keys(fields)) {
-    if (saved[key] !== undefined) values[key] = saved[key];
+    if (saved[key] !== undefined) values[key] = sanitizeSettingValue(key, saved[key]);
   }
   if (values.model === 'gemini-3.5-flash') values.model = DEFAULT_MODEL;
   for (const [key, value] of Object.entries(values)) fields[key].value = value;
