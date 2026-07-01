@@ -5,9 +5,11 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
-const SAVE_VERSION = 8;
+const RESET_MARKER_KEY = 'muhan.progress.reset.version';
+const RESET_PROGRESS_VERSION = '2026-07-01-full-reset-1';
+const SAVE_VERSION = 9;
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.32.2';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.32.3';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -891,6 +893,7 @@ let lastSpeaker = names[0];
 let nekoInteractionId = null;
 let choiceSlots = [];
 const recentPhrases = [];
+resetStoredProgressIfNeeded();
 let nekoMemory = loadNekoMemory();
 
 function pick(list) {
@@ -948,6 +951,20 @@ function safeWriteJsonStorage(key, value, maxBytes, label) {
     localStorage.setItem(key, raw);
     return true;
   } catch (error) {
+    return false;
+  }
+}
+
+function resetStoredProgressIfNeeded() {
+  try {
+    if (localStorage.getItem(RESET_MARKER_KEY) === RESET_PROGRESS_VERSION) return false;
+    safeRemoveStorage(GAME_STATE_KEY);
+    safeRemoveStorage(NEKO_MEMORY_KEY);
+    localStorage.setItem(RESET_MARKER_KEY, RESET_PROGRESS_VERSION);
+    addStorageWarning('요청에 따라 돈, 레벨, 장비, 아이템, 팀, 스토리, 경제, 네코 기억을 새 시작값으로 리셋했습니다. Gemini 설정은 유지했습니다.');
+    return true;
+  } catch (error) {
+    addStorageWarning('진행 데이터 리셋을 시도했지만 브라우저 저장소 접근이 막혀 현재 세션 기본값으로 시작합니다.');
     return false;
   }
 }
