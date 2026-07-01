@@ -5,9 +5,9 @@ const HISTORY_LIMIT = 80;
 const SETTINGS_KEY = 'muhan.neko.settings';
 const NEKO_MEMORY_KEY = 'muhan.neko.memory';
 const GAME_STATE_KEY = 'muhan.game.state';
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 7;
 const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.32.0';
+const APP_VERSION = document.querySelector('meta[name="app-version"]')?.content || '0.32.1';
 
 const statusEl = document.getElementById('status');
 const diagnosticsEl = document.getElementById('diagnostics');
@@ -114,6 +114,10 @@ const balanceConfig = {
   maxScars: 8,
   maxGoldLog: 5,
   maxEconomyConcepts: 8,
+  maxInventoryItems: 120,
+  maxInventoryStatusDisplay: 24,
+  maxInventoryCommandDisplay: 60,
+  maxSaveBytes: 4000000,
   autoRoomActionLimit: 2,
   autoDirectorQueueLimit: 5,
   autoReportWindow: 10,
@@ -863,6 +867,7 @@ let autoDirector = {
 let frontierPhaseIndex = 0;
 let visitedRooms = new Set([roomName]);
 let resolvedEvents = new Set();
+let saveLoadWarning = '';
 let customItems = {};
 let goldLog = [];
 let rogue = {
@@ -1711,6 +1716,7 @@ function nekoProfile() {
 
 function saveGameState() {
   try {
+    compactInventory();
     localStorage.setItem(GAME_STATE_KEY, JSON.stringify({
       saveVersion: SAVE_VERSION,
       roomName: canonicalRoomName(roomName),
@@ -1785,8 +1791,15 @@ function saveGameState() {
 function loadGameState() {
   let saved = {};
   try {
-    saved = JSON.parse(localStorage.getItem(GAME_STATE_KEY) || '{}');
+    const rawState = localStorage.getItem(GAME_STATE_KEY) || '{}';
+    if (rawState.length > balanceConfig.maxSaveBytes) {
+      localStorage.removeItem(GAME_STATE_KEY);
+      saveLoadWarning = `이전 브라우저 저장이 ${(rawState.length / 1024 / 1024).toFixed(1)}MB로 커져 Chrome이 멈출 수 있어 새 세션으로 정리했습니다.`;
+      return;
+    }
+    saved = JSON.parse(rawState);
   } catch (error) {
+    saveLoadWarning = '이전 브라우저 저장을 읽지 못해 새 세션으로 시작했습니다.';
     return;
   }
   const savedRoom = canonicalRoomName(saved.roomName);
@@ -1912,6 +1925,7 @@ function loadGameState() {
   for (const slot of ['무기', '방어구', '장신구']) {
     character.upgrades[slot] = Math.max(0, Number(character.upgrades[slot]) || 0);
   }
+  compactInventory();
   refreshAutoDirectorQueue();
 }
 
@@ -1919,7 +1933,7 @@ function renderStatusPanel() {
   const neko = nekoProfile();
   const growth = growthForJob();
   const stats = effectiveStats();
-  const directorQueue = autoDirector.queue.length ? autoDirector.queue : autoDirectorGoals(currentAutoMode());
+  const directorQueue = autoDirector.queue || [];
   const directorLines = directorQueue.slice(0, 3).map((goal, index) => `${index + 1}. ${goal.label} -> ${goal.choice.command}`);
   const debtors = Object.entries(aiDebt)
     .filter(([, debt]) => Number(debt) > 0)
@@ -2017,7 +2031,8 @@ function renderStatusPanel() {
     ...['무기', '방어구', '장신구'].map((slot) => `${slot}: +${character.upgrades[slot] || 0}`),
     '',
     `[${statusSections.inventory}]`,
-    ...character.inventory.map((item, index) => `${index + 1}. ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}`),
+    `보관: ${character.inventory.length}/${balanceConfig.maxInventoryItems}개`,
+    ...inventoryLines(balanceConfig.maxInventoryStatusDisplay),
     '',
     `[${statusSections.map}]`,
     mapText()
@@ -2029,8 +2044,67 @@ function hasItem(name) {
   return character.inventory.some((item) => item.startsWith(name));
 }
 
+function inventoryItemScore(item, index = 0) {
+  const stats = itemStats(item);
+  const shop = shopItems[item];
+  const equipped = Object.values(character.equipment).includes(item) ? 10000 : 0;
+  return equipped
+    + (stats.slot ? 500 + equipmentScore(item) * 12 : 0)
+    + (stats.special ? 240 : 0)
+    + (stats.lineage ? 80 : 0)
+    + (shop?.heal ? 40 : 0)
+    + Math.min(40, index / 8);
+}
+
+function inventorySaleValue(item) {
+  const stats = itemStats(item);
+  const shop = shopItems[item];
+  return Math.max(1, Math.round((shop?.price || equipmentScore(item) * 16 || 12) * 0.28));
+}
+
+function cleanupCustomItems() {
+  const keep = new Set([...character.inventory, ...Object.values(character.equipment)]);
+  customItems = Object.fromEntries(Object.entries(customItems).filter(([name]) => keep.has(name)));
+}
+
+function compactInventory({ silent = true } = {}) {
+  character.inventory = Array.isArray(character.inventory)
+    ? character.inventory.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+  const maxItems = balanceConfig.maxInventoryItems;
+  if (character.inventory.length <= maxItems) {
+    cleanupCustomItems();
+    return { removed: 0, refund: 0 };
+  }
+
+  const ranked = character.inventory.map((item, index) => ({ item, index, score: inventoryItemScore(item, index) }))
+    .sort((a, b) => b.score - a.score || b.index - a.index);
+  const keepIndexes = new Set(ranked.slice(0, maxItems).map(({ index }) => index));
+  const removedItems = character.inventory.filter((item, index) => {
+    if (keepIndexes.has(index)) return false;
+    if (customItems[item] && !Object.values(character.equipment).includes(item)) delete customItems[item];
+    return true;
+  });
+  character.inventory = ranked.slice(0, maxItems).map(({ item }) => item);
+  cleanupCustomItems();
+  const refund = Math.min(9999, removedItems.reduce((sum, item) => sum + inventorySaleValue(item), 0));
+  if (refund > 0) changeGold(refund, '보관함 자동정리');
+  if (!silent) {
+    append(`[보관함 자동정리] ${removedItems.length}개를 매각해 ${refund}전을 회수했습니다.`, 'choice');
+  }
+  return { removed: removedItems.length, refund };
+}
+
+function inventoryLines(limit = balanceConfig.maxInventoryStatusDisplay) {
+  const items = character.inventory.slice(0, limit).map((item, index) => `${index + 1}. ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}`);
+  const rest = character.inventory.length - limit;
+  if (rest > 0) items.push(`... 외 ${rest}개. "소지품"에서 더 보기 / ${balanceConfig.maxInventoryItems}개 초과 시 자동정리`);
+  return items.length ? items : ['비어 있음'];
+}
+
 function addItem(item) {
   character.inventory.push(item);
+  compactInventory();
 }
 
 function grantStoryReward(step) {
@@ -2575,6 +2649,7 @@ function setStoryStep(step, text) {
 }
 
 function commitProgress() {
+  compactInventory();
   renderStatusPanel();
   saveGameState();
 }
@@ -2782,7 +2857,10 @@ function talkNpc(input = '') {
 }
 
 function showInventory() {
-  append(`\n[소지품]\n${character.inventory.map((item, index) => {
+  compactInventory({ silent: false });
+  const visible = character.inventory.slice(0, balanceConfig.maxInventoryCommandDisplay);
+  const rest = character.inventory.length - visible.length;
+  append(`\n[소지품]\n보관: ${character.inventory.length}/${balanceConfig.maxInventoryItems}개${rest > 0 ? ` / 표시 ${visible.length}개, 외 ${rest}개` : ''}\n${visible.map((item, index) => {
     const stats = itemStats(item);
     return `${index + 1}. ${item}${itemBonusText(item) ? ` (${itemBonusText(item)})` : ''}${stats.lineage ? `\n   계보: ${stats.lineage}` : ''}`;
   }).join('\n') || '비어 있음'}`);
@@ -4078,3 +4156,4 @@ updateDiagnostics();
 append('무한대전 PC통신 접속 대기');
 append('1. 입장  2. 퇴장  3. 네코  4. 화면 지우기  5. 자동 진행');
 append('Gemini 키는 Vercel 환경변수 GEMINI_API_KEY를 사용합니다.');
+if (saveLoadWarning) append(`네코: ${saveLoadWarning}`, 'neko');
